@@ -1,0 +1,42 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "id": "0003_pledge",
+  "prevId": "63d7a10b-e00e-4419-81ec-9ee9f8fc6627",
+  "tables": {
+    "pledge_holdings": {
+      "name": "pledge_holdings",
+      "columns": {
+        "id": { "name": "id", "type": "text", "primaryKey": true, "notNull": true, "autoincrement": false },
+        "person_id": { "name": "person_id", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "ticker": { "name": "ticker", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "exchange": { "name": "exchange", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "shares_pledged": { "name": "shares_pledged", "type": "integer", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "as_of": { "name": "as_of", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false },
+        "source": { "name": "source", "type": "text", "primaryKey": false, "notNull": false, "autoincrement": false },
+        "created_at": { "name": "created_at", "type": "text", "primaryKey": false, "notNull": true, "autoincrement": false, "default": "''" }
+      },
+      "indexes": [
+        { "name": "idx_pledge_person", "columns": ["person_id", "as_of"], "unique": false },
+        { "name": "idx_pledge_ticker", "columns": ["ticker", "as_of"], "unique": false }
+      ],
+      "foreignKeys": {
+        "pledge_holdings_person_id_people_id_fk": {
+          "name": "pledge_holdings_person_id_people_id_fk",
+          "tableFrom": "pledge_holdings",
+          "tableTo": "people",
+          "columnsFrom": ["person_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": { "schemas": {}, "tables": {}, "columns": {} }
+}
