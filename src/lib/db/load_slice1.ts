@@ -17,6 +17,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { eq } from "drizzle-orm";
 import { sources, people, baselineEstimates } from "./schema";
 import { createId } from "@paralleldrive/cuid2";
+import { politeFetch } from "@/lib/providers/http";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -49,8 +50,7 @@ interface RTBItem {
 
 async function fetchRTBData(): Promise<RTBItem[]> {
   const url = "https://cdn.statically.io/gh/komed3/rtb-api/main/api/list/list/latest";
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`rtb-api ${res.status} — ABORTING, no synthetic fallback`);
+  const res = await politeFetch(url);
   return res.json() as Promise<RTBItem[]>;
 }
 
@@ -84,6 +84,19 @@ async function main() {
     url: "https://github.com/komed3/rtb-api",
     license: "",
     attribution: "Real Time Billionaires project",
+    createdAt: now,
+  }).onConflictDoNothing().run();
+
+  // Yahoo Finance — used by slice2 and slice_prices for stock snapshots.
+  // NOTE: Yahoo's ToS prohibit automated scraping. The /v8/finance/chart/
+  // endpoint is undocumented. If this app is published, migrate to
+  // Finnhub's free tier (https://finnhub.io) which requires a free API key.
+  db.insert(sources).values({
+    id: "yahoo-finance",
+    name: "Yahoo Finance",
+    url: "https://finance.yahoo.com",
+    license: "See Yahoo Terms of Service — no automated scraping permitted",
+    attribution: "Yahoo Finance",
     createdAt: now,
   }).onConflictDoNothing().run();
 
