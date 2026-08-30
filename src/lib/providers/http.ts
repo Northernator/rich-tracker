@@ -19,6 +19,7 @@ type HostConfig = { limit: number; windowMs: number };
 
 const SEC_CONFIG: HostConfig = { limit: 8, windowMs: 1000 };
 const COMPANIES_HOUSE_CONFIG: HostConfig = { limit: 550, windowMs: 5 * 60 * 1000 };
+const RTB_CONFIG: HostConfig = { limit: 20, windowMs: 1000 };
 const DEFAULT_CONFIG: HostConfig = { limit: 2, windowMs: 1000 };
 
 function getHostConfig(hostname: string): HostConfig {
@@ -28,6 +29,13 @@ function getHostConfig(hostname: string): HostConfig {
   }
   if (h === "api.company-information.service.gov.uk") {
     return COMPANIES_HOUSE_CONFIG;
+  }
+  if (
+    h === "cdn.statically.io" ||
+    h === "cdn.jsdelivr.net" ||
+    h === "raw.githubusercontent.com"
+  ) {
+    return RTB_CONFIG;
   }
   return DEFAULT_CONFIG;
 }
