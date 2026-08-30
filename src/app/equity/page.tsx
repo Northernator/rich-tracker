@@ -6,6 +6,8 @@ import {
   people,
   pledgeHoldings,
 } from "@/lib/db/schema";
+import { loadFxLookup } from "@/lib/db/fx";
+import { toUsdCents } from "@/lib/money";
 import { sql, asc, eq, or } from "drizzle-orm";
 
 function formatCents(cents: number): string {
@@ -55,27 +57,49 @@ interface PersonRow {
   liquidPct: number | null;
   pledgedCents: number;
   leverageRatio: number | null; // baseline / (liquid - pledged)
+  /** Holdings whose local-currency value could not be converted (no FX rate). */
+  fxErrors: Array<{ ticker: string; message: string }>;
   tickers: Array<{
     ticker: string;
     exchange: string;
     shares: number;
-    price: number;
+    /** USD cents for the latest price, or null when the price or its FX rate is unavailable. */
+    priceUsdCents: number | null;
+    currency: string;
     estimated: number;
+    fxError: string | null;
   }>;
   pledges: Array<{ ticker: string; shares: number; source: string; sourceType: "verified" | "unverified" }>;
   sparkData: Array<{ date: string; price: number }>;
 }
 
 export default async function EquityPage() {
-  // Latest price per ticker (most recent as_of)
-  const latestPriceRows = (await db
-    .select({ ticker: stockSnapshots.ticker, priceCents: stockSnapshots.priceCents })
-    .from(stockSnapshots)
-    .orderBy(asc(stockSnapshots.asOf))) as Array<{ ticker: string; priceCents: number }>;
+  const fx = await loadFxLookup();
 
-  const latestByTicker = new Map<string, number>();
+  // Latest price per ticker (most recent as_of), carrying its own asOf and
+  // currency so a local-currency price converts at the rate that applied then.
+  const latestPriceRows = (await db
+    .select({
+      ticker: stockSnapshots.ticker,
+      priceCents: stockSnapshots.priceCents,
+      asOf: stockSnapshots.asOf,
+      currency: stockSnapshots.currency,
+    })
+    .from(stockSnapshots)
+    .orderBy(asc(stockSnapshots.asOf))) as Array<{
+    ticker: string;
+    priceCents: number;
+    asOf: string;
+    currency: string;
+  }>;
+
+  const latestByTicker = new Map<string, { priceCents: number; asOf: string; currency: string }>();
   for (const s of latestPriceRows) {
-    latestByTicker.set(s.ticker, s.priceCents);
+    latestByTicker.set(s.ticker, {
+      priceCents: s.priceCents,
+      asOf: s.asOf,
+      currency: s.currency,
+    });
   }
 
   // All holdings
@@ -134,9 +158,32 @@ export default async function EquityPage() {
     if (!person) continue;
 
     let liquidCents = 0;
+    const fxErrors: PersonRow["fxErrors"] = [];
+    const tickerRows: PersonRow["tickers"] = [];
     for (const h of holds) {
-      const price = latestByTicker.get(h.ticker) ?? 0;
-      liquidCents += price * h.shares;
+      const latest = latestByTicker.get(h.ticker);
+      let priceUsdCents: number | null = null;
+      let fxError: string | null = null;
+      if (latest) {
+        try {
+          priceUsdCents = toUsdCents(latest.priceCents, latest.currency, latest.asOf, fx);
+        } catch (err) {
+          fxError = err instanceof Error ? err.message : String(err);
+          fxErrors.push({ ticker: h.ticker, message: fxError });
+        }
+      }
+      if (priceUsdCents != null) {
+        liquidCents += priceUsdCents * h.shares;
+      }
+      tickerRows.push({
+        ticker: h.ticker,
+        exchange: h.exchange,
+        shares: h.shares,
+        priceUsdCents,
+        currency: latest?.currency ?? "USD",
+        estimated: h.estimated,
+        fxError,
+      });
     }
 
     const baselineCents = baselineByPerson.get(personId) ?? 0;
@@ -176,13 +223,8 @@ export default async function EquityPage() {
       liquidPct,
       pledgedCents: 0,
       leverageRatio: null,
-      tickers: holds.map((h) => ({
-        ticker: h.ticker,
-        exchange: h.exchange,
-        shares: h.shares,
-        price: latestByTicker.get(h.ticker) ?? 0,
-        estimated: h.estimated,
-      })),
+      fxErrors,
+      tickers: tickerRows,
       pledges: [],
       sparkData,
     });
@@ -194,8 +236,17 @@ export default async function EquityPage() {
 
     let pledgedCents = 0;
     for (const pledge of pledges) {
-      const price = latestByTicker.get(pledge.ticker) ?? 0;
-      pledgedCents += price * pledge.sharesPledged;
+      const latest = latestByTicker.get(pledge.ticker);
+      if (latest) {
+        try {
+          pledgedCents += toUsdCents(latest.priceCents, latest.currency, latest.asOf, fx) * pledge.sharesPledged;
+        } catch (err) {
+          row.fxErrors.push({
+            ticker: pledge.ticker,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
     }
 
     // Leverage is only meaningful when the verified liquid stake is a
@@ -312,14 +363,46 @@ export default async function EquityPage() {
                 </td>
                 <td className="px-4 py-3 text-right font-mono">
                   {row.tickers.map((t) => (
-                    <div key={t.ticker} className={t.price > 0 ? "text-fg" : "text-fg-faint"}>
-                      {t.price > 0 ? formatCents(t.price) : "—"}
+                    <div
+                      key={t.ticker}
+                      className={
+                        t.fxError != null
+                          ? "text-danger"
+                          : t.priceUsdCents != null && t.priceUsdCents > 0
+                          ? "text-fg"
+                          : "text-fg-faint"
+                      }
+                    >
+                      {t.fxError != null ? (
+                        <span
+                          title={`No FX rate for ${t.currency} on the price date: ${t.fxError}`}
+                        >
+                          &#9888; n/a
+                        </span>
+                      ) : t.priceUsdCents != null && t.priceUsdCents > 0 ? (
+                        formatCents(t.priceUsdCents)
+                      ) : (
+                        "—"
+                      )}
                       {row.tickers.indexOf(t) < row.tickers.length - 1 ? <br /> : ""}
                     </div>
                   ))}
                 </td>
                 <td className="px-4 py-3 text-right font-mono font-medium text-fg">
-                  {row.liquidCents > 0 ? formatB(row.liquidCents / 1e11) : "—"}
+                  {row.fxErrors.length > 0 ? (
+                    <span
+                      className="text-danger"
+                      title={`Skipped ${row.fxErrors.length} holding(s): ${row.fxErrors
+                        .map((e) => e.ticker)
+                        .join(", ")} — no FX rate, value excluded from total.`}
+                    >
+                      &#9888; partial
+                    </span>
+                  ) : row.liquidCents > 0 ? (
+                    formatB(row.liquidCents / 1e11)
+                  ) : (
+                    "—"
+                  )}
                 </td>
                 <td className="px-4 py-3 text-right">
                   {row.liquidPct != null ? (

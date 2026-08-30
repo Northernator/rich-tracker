@@ -168,7 +168,16 @@ export const fxRates = sqliteTable("fx_rates", {
   rate: real("rate").notNull(),        // 1 base = rate quote
   sourceUrl: text("source_url").notNull(),
   createdAt: text("created_at").notNull().default(""),
-});
+}, (t) => ({
+  /**
+   * One row per currency per day. Without it `onConflictDoNothing` is a no-op
+   * against the cuid-less natural key and a re-run doubles the table. Also the
+   * structural guarantee behind "historical snapshots convert at the rate that
+   * applied then": the (base, quote, as_of) triple must be unique or a date
+   * can silently hold two conflicting rates.
+   */
+  uxFxBaseQuoteDate: uniqueIndex("ux_fx_base_quote_date").on(t.base, t.quote, t.asOf),
+}));
 
 // Slice 6: Asset→owner graph
 // Physical assets (real estate, vessels, aircraft, art) owned by people.

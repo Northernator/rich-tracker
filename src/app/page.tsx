@@ -1,5 +1,7 @@
 import { db } from "@/lib/db";
 import { equityHoldings, stockSnapshots, baselineEstimates, people } from "@/lib/db/schema";
+import { loadFxLookup } from "@/lib/db/fx";
+import { toUsdCents } from "@/lib/money";
 import { sql, asc, eq } from "drizzle-orm";
 import Link from "next/link";
 
@@ -89,6 +91,7 @@ interface PersonRow {
   privateCents: number;
   liquidPct: number;
   confidence: "high" | "medium" | "low";
+  fxErrors: Array<{ ticker: string; message: string }>;
   tickers: Array<{ ticker: string; exchange: string; shares: number; price: number; estimated: number }>;
 }
 
@@ -159,13 +162,31 @@ export default async function HomePage({
     });
   }
 
-  // Latest price per ticker
+  // Latest price per ticker (most recent as_of), carrying currency + asOf so a
+  // local-currency price converts at the rate that applied then.
+  const fx = await loadFxLookup();
   const latestPrices = (await db
-    .select({ ticker: stockSnapshots.ticker, priceCents: stockSnapshots.priceCents })
+    .select({
+      ticker: stockSnapshots.ticker,
+      priceCents: stockSnapshots.priceCents,
+      asOf: stockSnapshots.asOf,
+      currency: stockSnapshots.currency,
+    })
     .from(stockSnapshots)
-    .orderBy(asc(stockSnapshots.asOf))) as Array<{ ticker: string; priceCents: number }>;
-  const priceByTicker = new Map<string, number>();
-  for (const s of latestPrices) priceByTicker.set(s.ticker, s.priceCents);
+    .orderBy(asc(stockSnapshots.asOf))) as Array<{
+    ticker: string;
+    priceCents: number;
+    asOf: string;
+    currency: string;
+  }>;
+  const priceByTicker = new Map<string, { priceCents: number; asOf: string; currency: string }>();
+  for (const s of latestPrices) {
+    priceByTicker.set(s.ticker, {
+      priceCents: s.priceCents,
+      asOf: s.asOf,
+      currency: s.currency,
+    });
+  }
 
   // All holdings grouped by person
   const allHoldings = await db.select().from(equityHoldings).orderBy(asc(equityHoldings.id));
@@ -202,15 +223,27 @@ export default async function HomePage({
 
     const holdings = holdingsByPerson.get(personId) ?? [];
     let liquidCents = 0;
+    const fxErrors: PersonRow["fxErrors"] = [];
     const tickers: PersonRow["tickers"] = [];
     for (const h of holdings) {
-      const price = priceByTicker.get(h.ticker) ?? 0;
-      liquidCents += price * h.shares;
+      const latest = priceByTicker.get(h.ticker);
+      let usdPriceCents = 0;
+      if (latest) {
+        try {
+          usdPriceCents = toUsdCents(latest.priceCents, latest.currency, latest.asOf, fx);
+        } catch (err) {
+          fxErrors.push({
+            ticker: h.ticker,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      liquidCents += usdPriceCents * h.shares;
       tickers.push({
         ticker: h.ticker,
         exchange: h.exchange,
         shares: h.shares,
-        price: price / 100,
+        price: usdPriceCents / 100,
         estimated: h.estimated,
       });
     }
@@ -256,6 +289,7 @@ export default async function HomePage({
       privateCents,
       liquidPct,
       confidence,
+      fxErrors,
       tickers,
     });
   }
@@ -558,7 +592,16 @@ export default async function HomePage({
                         )}
                       </div>
                       <span className="text-xs font-mono text-fg-muted w-10 text-right">
-                        {row.liquidPct > 100 ? (
+                        {row.fxErrors.length > 0 ? (
+                          <span
+                            className="text-danger"
+                            title={`${row.fxErrors.length} holding(s) excluded — no FX rate to USD: ${row.fxErrors
+                              .map((e) => e.ticker)
+                              .join(", ")}`}
+                          >
+                            &#9888;
+                          </span>
+                        ) : row.liquidPct > 100 ? (
                           <span
                             className="text-danger"
                             title="Verified liquid equity exceeds the baseline net worth. The share count, the price or the baseline is wrong — this figure is not trustworthy."

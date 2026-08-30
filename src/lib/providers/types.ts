@@ -57,4 +57,12 @@ export interface PriceProvider {
 export interface FxProvider {
   readonly name: string;
   ratesToUsd(asOfISO?: string): Promise<Record<string, number>>;
+  /**
+   * Date-keyed series for a range. `rates` maps currency → "1 unit = N USD",
+   * same shape as `ratesToUsd`. Used for the one-call backfill of fx_rates.
+   */
+  ratesToUsdSeries(
+    startISO: string,
+    endISO: string
+  ): Promise<Array<{ asOf: string; rates: Record<string, number> }>>;
 }
