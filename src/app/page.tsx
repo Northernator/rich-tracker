@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { equityHoldings, stockSnapshots, baselineEstimates, people } from "@/lib/db/schema";
+import { equityHoldings, stockSnapshots, baselineEstimates, people, valuationSnapshots } from "@/lib/db/schema";
 import { loadFxLookup } from "@/lib/db/fx";
 import { toUsdCents } from "@/lib/money";
 import { sql, asc, eq } from "drizzle-orm";
@@ -40,6 +40,40 @@ const yearOf = (iso: string): string => (iso && iso.length >= 4 ? iso.slice(0, 4
 
 function formatB(cents: number): string {
   return `$${(cents / 100 / 1e9).toFixed(1)}B`;
+}
+
+/**
+ * Wealth-over-time sparkline from `valuation_snapshots` — liquid cents over
+ * the snapshot's ts. The chunk rule: this plots WEALTH from the persisted
+ * snapshots, never share price. Snapshots accumulate one row per person per
+ * run, so the line grows a point each time `npm run snapshot` runs.
+ */
+function wealthSparklineSVG(
+  data: Array<{ ts: string; liquidCents: number }>,
+  width = 72,
+  height = 24
+): string {
+  if (data.length < 2) return "";
+  const vals = data.map((d) => d.liquidCents);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const range = max - min || 1;
+  const step = width / (data.length - 1);
+
+  const points = data
+    .map((_, i) => {
+      const x = i * step;
+      const y = height - ((vals[i] - min) / range) * (height - 4) - 2;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+
+  const isUp = vals[vals.length - 1] >= vals[0];
+  const color = isUp ? "#1a8a5c" : "#c0392b";
+
+  return `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+    <polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
 }
 
 function spreadStats(values: number[]) {
@@ -93,6 +127,11 @@ interface PersonRow {
   confidence: "high" | "medium" | "low";
   fxErrors: Array<{ ticker: string; message: string }>;
   tickers: Array<{ ticker: string; exchange: string; shares: number; price: number; estimated: number }>;
+  /**
+   * Wealth over time from valuation_snapshots (liquid cents per snapshot run),
+   * oldest first. Plots the persisted honest number — never share price.
+   */
+  wealthTrend: Array<{ ts: string; liquidCents: number }>;
 }
 
 const SORTS = {
@@ -200,6 +239,26 @@ export default async function HomePage({
   const peopleById = new Map<string, (typeof allPeople)[number]>();
   for (const p of allPeople) peopleById.set(p.id, p);
 
+  // Wealth over time from persisted snapshots: liquid cents per snapshot run,
+  // oldest first. Plots the honest number, not share price.
+  const snapRows = (await db
+    .select({
+      personId: valuationSnapshots.personId,
+      ts: valuationSnapshots.ts,
+      liquidCents: valuationSnapshots.liquidCents,
+    })
+    .from(valuationSnapshots)
+    .orderBy(asc(valuationSnapshots.ts))) as Array<{
+    personId: string;
+    ts: string;
+    liquidCents: number;
+  }>;
+  const wealthByPerson = new Map<string, Array<{ ts: string; liquidCents: number }>>();
+  for (const s of snapRows) {
+    if (!wealthByPerson.has(s.personId)) wealthByPerson.set(s.personId, []);
+    wealthByPerson.get(s.personId)!.push({ ts: s.ts, liquidCents: s.liquidCents });
+  }
+
   // Build rows
   const rows: PersonRow[] = [];
 
@@ -291,6 +350,7 @@ export default async function HomePage({
       confidence,
       fxErrors,
       tickers,
+      wealthTrend: wealthByPerson.get(person.id) ?? [],
     });
   }
 
@@ -433,6 +493,10 @@ export default async function HomePage({
               <th className="px-4 py-3 text-xs uppercase tracking-widest text-fg-muted font-medium w-48">
                 <span className="sr-only">Composition</span>
                 Liquid / Private
+              </th>
+              <th className="text-center px-4 py-3 text-xs uppercase tracking-widest text-fg-muted font-medium w-24">
+                <span className="sr-only">Wealth over time</span>
+                Trend
               </th>
               <th className="text-center px-4 py-3 text-xs uppercase tracking-widest text-fg-muted font-medium w-20">
                 Conf
@@ -615,6 +679,23 @@ export default async function HomePage({
                         )}
                       </span>
                     </div>
+                  </td>
+
+                  {/* Wealth-over-time sparkline (from valuation_snapshots) */}
+                  <td className="px-4 py-4 text-center align-top">
+                    {row.wealthTrend.length >= 2 ? (
+                      <span
+                        title={`Wealth over time (${row.wealthTrend.length} snapshot${
+                          row.wealthTrend.length === 1 ? "" : "s"
+                        }): ${row.wealthTrend
+                          .map((w) => `${w.ts.slice(0, 10)} ${formatB(w.liquidCents)}`)
+                          .join(" → ")}`}
+                        className="inline-block align-middle"
+                        dangerouslySetInnerHTML={{ __html: wealthSparklineSVG(row.wealthTrend) }}
+                      />
+                    ) : (
+                      <span className="font-mono text-[10px] text-fg-faint">—</span>
+                    )}
                   </td>
 
                   {/* Confidence badge */}

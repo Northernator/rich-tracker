@@ -264,3 +264,38 @@ export const eventImpacts = sqliteTable("event_impacts", {
 
 export type EventAssetLink = typeof eventAssetLinks.$inferSelect;
 export type EventImpact = typeof eventImpacts.$inferSelect;
+
+// Slice 15: Persisted valuation snapshots — "the honest number", frozen.
+// One row per person per run. The `inputs` JSON records every number that
+// produced liquid_cents (each holding's security_id, share count, price_cents,
+// as_of, FX rate, and the baseline row id) so the figure can be reproduced
+// exactly from the stored inputs. method_version starts at 'v1' and only ever
+// moves forward — old rows are never recomputed under a new version, new rows
+// are inserted alongside them.
+export const valuationSnapshots = sqliteTable("valuation_snapshots", {
+  id: text("id").primaryKey(),
+  personId: text("person_id").notNull().references(() => people.id, { onDelete: "cascade" }),
+  ts: text("ts").notNull(), // ISO instant, truncated to the minute
+  liquidCents: integer("liquid_cents").notNull(),
+  baselineCents: integer("baseline_cents").notNull(),
+  pledgedCents: integer("pledged_cents").notNull().default(0),
+  verifiability: real("verifiability"), // liquid / baseline, deliberately NOT clamped to <= 1
+  methodVersion: text("method_version").notNull(),
+  inputs: text("inputs").notNull(), // JSON — the full audit trail for this row
+  createdAt: text("created_at").notNull().default(""),
+}, (t) => ({
+  ixSnapPersonTs: index("ix_snap_person_ts").on(t.personId, t.ts),
+  /**
+   * Anti-duplicate guarantee. ts is minute-truncated, so a second run within
+   * the same minute produces the same (person_id, ts, method_version) and
+   * `onConflictDoNothing()` inserts nothing — running `npm run snapshot`
+   * twice in a minute never doubles the table.
+   */
+  uxSnapPersonTsMethod: uniqueIndex("ux_snap_person_ts_method").on(
+    t.personId,
+    t.ts,
+    t.methodVersion
+  ),
+}));
+
+export type ValuationSnapshot = typeof valuationSnapshots.$inferSelect;

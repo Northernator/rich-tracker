@@ -49,6 +49,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/ownership" className="text-fg-muted hover:text-fg transition-colors">Ownership</Link>
               <Link href="/globe" className="text-fg-muted hover:text-fg transition-colors">Globe</Link>
               <Link href="/events" className="text-fg-muted hover:text-fg transition-colors">Events</Link>
+              <Link href="/methodology" className="text-fg-muted hover:text-fg transition-colors">Method</Link>
               <Link href="/about" className="text-fg-muted hover:text-fg transition-colors">About</Link>
             </nav>
           </div>

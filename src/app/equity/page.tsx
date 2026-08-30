@@ -5,9 +5,10 @@ import {
   baselineEstimates,
   people,
   pledgeHoldings,
+  securities,
 } from "@/lib/db/schema";
 import { loadFxLookup } from "@/lib/db/fx";
-import { toUsdCents } from "@/lib/money";
+import { computeValuation } from "@/lib/valuation";
 import { sql, asc, eq, or } from "drizzle-orm";
 
 function formatCents(cents: number): string {
@@ -115,22 +116,48 @@ export default async function EquityPage() {
     peopleById.set(p.id, p);
   }
 
-  // Latest baseline per person (max as_of)
-  const latestBaselines = await db
+  // Latest baseline per person (max as_of), carrying the row id for inputs.
+  const latestBaselines = (await db
     .select({
       personId: baselineEstimates.personId,
+      id: baselineEstimates.id,
       netWorthCents: baselineEstimates.netWorthCents,
+      asOf: baselineEstimates.asOf,
+      sourceId: baselineEstimates.sourceId,
     })
     .from(baselineEstimates)
     .innerJoin(
       sql`(SELECT person_id, MAX(as_of) AS max_as_of FROM ${baselineEstimates} GROUP BY person_id) latest`,
       sql`${baselineEstimates.personId} = latest.person_id AND ${baselineEstimates.asOf} = latest.max_as_of`
-    );
+    )) as Array<{
+    personId: string;
+    id: string;
+    netWorthCents: number;
+    asOf: string;
+    sourceId: string;
+  }>;
 
-  const baselineByPerson = new Map<string, number>();
+  const baselineByPerson = new Map<string, {
+    id: string;
+    netWorthCents: number;
+    asOf: string;
+    sourceId: string;
+  }>();
   for (const r of latestBaselines) {
-    baselineByPerson.set(r.personId, r.netWorthCents);
+    baselineByPerson.set(r.personId, {
+      id: r.id,
+      netWorthCents: r.netWorthCents,
+      asOf: r.asOf,
+      sourceId: r.sourceId,
+    });
   }
+
+  // securities.id by ticker — recorded in snapshot inputs so each holding is traceable.
+  const securityRows = await db
+    .select({ id: securities.id, ticker: securities.ticker })
+    .from(securities);
+  const securityIdsByTicker = new Map<string, string>();
+  for (const s of securityRows) securityIdsByTicker.set(s.ticker, s.id);
 
   // Group holdings by person
   const personHoldings = new Map<string, typeof allHoldings[number][]>();
@@ -157,37 +184,31 @@ export default async function EquityPage() {
     const person = peopleById.get(personId);
     if (!person) continue;
 
-    let liquidCents = 0;
-    const fxErrors: PersonRow["fxErrors"] = [];
-    const tickerRows: PersonRow["tickers"] = [];
-    for (const h of holds) {
-      const latest = latestByTicker.get(h.ticker);
-      let priceUsdCents: number | null = null;
-      let fxError: string | null = null;
-      if (latest) {
-        try {
-          priceUsdCents = toUsdCents(latest.priceCents, latest.currency, latest.asOf, fx);
-        } catch (err) {
-          fxError = err instanceof Error ? err.message : String(err);
-          fxErrors.push({ ticker: h.ticker, message: fxError });
-        }
-      }
-      if (priceUsdCents != null) {
-        liquidCents += priceUsdCents * h.shares;
-      }
-      tickerRows.push({
-        ticker: h.ticker,
-        exchange: h.exchange,
-        shares: h.shares,
-        priceUsdCents,
-        currency: latest?.currency ?? "USD",
-        estimated: h.estimated,
-        fxError,
-      });
-    }
+    const baseline = baselineByPerson.get(personId) ?? null;
+    const valuation = computeValuation({
+      personId,
+      holdings: holds,
+      pledges: personPledges.get(personId) ?? [],
+      latestPrices: latestByTicker,
+      securityIds: securityIdsByTicker,
+      baseline,
+      fx,
+    });
 
-    const baselineCents = baselineByPerson.get(personId) ?? 0;
+    const liquidCents = valuation.liquidCents;
+    const pledgedCents = valuation.pledgedCents;
+    const baselineCents = valuation.baselineCents;
     const liquidPct = baselineCents > 0 ? (liquidCents / baselineCents) * 100 : null;
+
+    // Leverage is only meaningful when the verified liquid stake is a
+    // material share of the baseline. Below that the denominator is noise
+    // and the ratio explodes (Bezos previously rendered as 3511.88x).
+    const netEquityCents = Math.max(0, liquidCents - pledgedCents);
+    const liquidShare = baselineCents > 0 ? liquidCents / baselineCents : 0;
+    const leverageRatio =
+      netEquityCents > 0 && liquidShare >= 0.05 && pledgedCents > 0
+        ? baselineCents / netEquityCents
+        : null;
 
     // 30-day history for sparkline (combine all tickers for this person)
     const tickerList = holds.map((h) => h.ticker);
@@ -221,52 +242,18 @@ export default async function EquityPage() {
       liquidCents,
       baselineCents,
       liquidPct,
-      pledgedCents: 0,
-      leverageRatio: null,
-      fxErrors,
-      tickers: tickerRows,
-      pledges: [],
+      pledgedCents,
+      leverageRatio,
+      fxErrors: valuation.fxErrors,
+      tickers: valuation.holdings,
+      pledges: (personPledges.get(personId) ?? []).map((p) => ({
+        ticker: p.ticker,
+        shares: p.sharesPledged,
+        source: p.source ?? "",
+        sourceType: (p.sourceType as "verified" | "unverified") ?? "unverified",
+      })),
       sparkData,
     });
-  }
-
-  // Enrich rows with pledge data and compute leverage
-  for (const row of rows) {
-    const pledges = personPledges.get(row.personId) ?? [];
-
-    let pledgedCents = 0;
-    for (const pledge of pledges) {
-      const latest = latestByTicker.get(pledge.ticker);
-      if (latest) {
-        try {
-          pledgedCents += toUsdCents(latest.priceCents, latest.currency, latest.asOf, fx) * pledge.sharesPledged;
-        } catch (err) {
-          row.fxErrors.push({
-            ticker: pledge.ticker,
-            message: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-    }
-
-    // Leverage is only meaningful when the verified liquid stake is a
-    // material share of the baseline. Below that the denominator is noise
-    // and the ratio explodes (Bezos previously rendered as 3511.88x).
-    const netEquityCents = Math.max(0, row.liquidCents - pledgedCents);
-    const liquidShare = row.baselineCents > 0 ? row.liquidCents / row.baselineCents : 0;
-    const leverageRatio =
-      netEquityCents > 0 && liquidShare >= 0.05 && pledgedCents > 0
-        ? row.baselineCents / netEquityCents
-        : null;
-
-    row.pledgedCents = pledgedCents;
-    row.leverageRatio = leverageRatio;
-    row.pledges = pledges.map(p => ({
-      ticker: p.ticker,
-      shares: p.sharesPledged,
-      source: p.source ?? "",
-      sourceType: (p.sourceType as "verified" | "unverified") ?? "unverified",
-    }));
   }
 
   rows.sort((a, b) => b.liquidCents - a.liquidCents);

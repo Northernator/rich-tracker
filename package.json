@@ -9,6 +9,7 @@
     "lint": "eslint",
     "rebuild": "node --import tsx/cjs src/lib/db/rebuild.ts",
     "prices": "pnpm exec tsx src/lib/db/load_slice_prices.ts",
+    "snapshot": "pnpm exec tsx src/lib/db/snapshot.ts",
     "cron": "pnpm exec tsx src/lib/cron/worker.ts",
     "fix:data": "node scripts/fix_data.mjs",
     "db:backup": "node -e \"const D=require('better-sqlite3');const d=new D('data/app.db');d.backup('data/backups/manual-'+Date.now()+'.db').then(()=>console.log('ok'))\"",
