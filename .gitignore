@@ -39,5 +39,17 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local database + raw capture audit trail
 data/
-data/
+
+# agent harness state
+.mimosa/
+
+# unrelated project that was dropped into this workspace
+# (personal finance app with its own package.json/node_modules/dist)
+/elite/
+
+# scratch directory pending manual deletion. Contains a file named "nul",
+# which is a reserved device name on Windows and cannot be indexed by git.
+/_to_delete/

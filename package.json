@@ -6,15 +6,23 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "rebuild": "node --import tsx/cjs src/lib/db/rebuild.ts",
+    "prices": "pnpm exec tsx src/lib/db/load_slice_prices.ts",
+    "cron": "pnpm exec tsx src/lib/cron/worker.ts",
+    "fix:data": "node scripts/fix_data.mjs",
+    "db:backup": "node -e \"const D=require('better-sqlite3');const d=new D('data/app.db');d.backup('data/backups/manual-'+Date.now()+'.db').then(()=>console.log('ok'))\"",
+    "fix:data2": "node scripts/fix_data_v2.mjs"
   },
   "dependencies": {
     "@paralleldrive/cuid2": "^3.3.0",
     "better-sqlite3": "^13.0.3",
     "drizzle-orm": "^0.45.2",
+    "globe.gl": "^2.46.2",
     "next": "16.3.3",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -25,6 +33,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.3.3",
+    "node-cron": "^4.6.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.12",
     "typescript": "^5"

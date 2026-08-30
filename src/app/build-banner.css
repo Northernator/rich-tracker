@@ -1,0 +1,21 @@
+/* Data-provenance warning bar — shown on every page while DATA_STATUS !== 'verified' */
+.dev-banner {
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 6px 0;
+  text-align: center;
+  font-family: var(--font-mono, monospace);
+  letter-spacing: 0.02em;
+}
+
+.dev-banner a {
+  color: inherit;
+  text-decoration: underline;
+  opacity: 0.85;
+}
+
+.dev-banner a:hover {
+  opacity: 1;
+}

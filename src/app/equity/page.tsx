@@ -6,9 +6,7 @@ import {
   people,
   pledgeHoldings,
 } from "@/lib/db/schema";
-import { sql, asc, eq } from "drizzle-orm";
-import Database from "better-sqlite3";
-import { join } from "path";
+import { sql, asc, eq, or } from "drizzle-orm";
 
 function formatCents(cents: number): string {
   return `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -47,6 +45,7 @@ function sparklineSVG(
 }
 
 interface PersonRow {
+  personId: string;
   slug: string;
   name: string;
   country: string;
@@ -63,7 +62,7 @@ interface PersonRow {
     price: number;
     estimated: number;
   }>;
-  pledges: Array<{ ticker: string; shares: number; source: string }>;
+  pledges: Array<{ ticker: string; shares: number; source: string; sourceType: "verified" | "unverified" }>;
   sparkData: Array<{ date: string; price: number }>;
 }
 
@@ -86,30 +85,27 @@ export default async function EquityPage() {
     .orderBy(asc(equityHoldings.id));
 
   // All people
-  const allPeople = await db.select().from(people);
+  const allPeople = await db.select().from(people).where(eq(people.isPublicFigure, 1));
   const peopleById = new Map<string, typeof allPeople[number]>();
   for (const p of allPeople) {
     peopleById.set(p.id, p);
   }
 
-  // Latest baseline per person (max as_of) — raw SQL since drizzle's aggregate
-  // doesn't cleanly support correlated subqueries in this version
-  const sqliteRaw = new Database(join(process.cwd(), "data", "app.db"));
-  const latestBaselineRaw = sqliteRaw
-    .prepare(
-      `SELECT person_id, net_worth_cents
-       FROM baseline_estimates
-       WHERE as_of = (
-         SELECT MAX(as_of) FROM baseline_estimates be2
-         WHERE be2.person_id = baseline_estimates.person_id
-       )`
-    )
-    .all() as Array<{ person_id: string; net_worth_cents: number }>;
-  sqliteRaw.close();
+  // Latest baseline per person (max as_of)
+  const latestBaselines = await db
+    .select({
+      personId: baselineEstimates.personId,
+      netWorthCents: baselineEstimates.netWorthCents,
+    })
+    .from(baselineEstimates)
+    .innerJoin(
+      sql`(SELECT person_id, MAX(as_of) AS max_as_of FROM ${baselineEstimates} GROUP BY person_id) latest`,
+      sql`${baselineEstimates.personId} = latest.person_id AND ${baselineEstimates.asOf} = latest.max_as_of`
+    );
 
   const baselineByPerson = new Map<string, number>();
-  for (const r of latestBaselineRaw) {
-    baselineByPerson.set(r.person_id, r.net_worth_cents);
+  for (const r of latestBaselines) {
+    baselineByPerson.set(r.personId, r.netWorthCents);
   }
 
   // Group holdings by person
@@ -148,10 +144,18 @@ export default async function EquityPage() {
 
     // 30-day history for sparkline (combine all tickers for this person)
     const tickerList = holds.map((h) => h.ticker);
+    // Build parameterized IN clause: chain `eq` predicates with `or`
+    const tickerInWhere =
+      tickerList.length === 1
+        ? eq(stockSnapshots.ticker, tickerList[0])
+        : tickerList.slice(1).reduce(
+            (acc: ReturnType<typeof or>, t) => or(acc, eq(stockSnapshots.ticker, t)),
+            eq(stockSnapshots.ticker, tickerList[0]) as ReturnType<typeof or>
+          );
     const historyRows = (await db
       .select({ date: stockSnapshots.asOf, priceCents: stockSnapshots.priceCents })
       .from(stockSnapshots)
-      .where(sql`${stockSnapshots.ticker} IN (${sql.join(tickerList.map((t) => sql`${t}`))})`)
+      .where(tickerInWhere)
       .orderBy(sql`${stockSnapshots.asOf} DESC`)
       .limit(30)) as Array<{ date: string; priceCents: number }>;
 
@@ -162,6 +166,7 @@ export default async function EquityPage() {
     }));
 
     rows.push({
+      personId,
       slug: person.slug,
       name: person.fullName,
       country: person.country ?? "",
@@ -185,12 +190,7 @@ export default async function EquityPage() {
 
   // Enrich rows with pledge data and compute leverage
   for (const row of rows) {
-    // Find personId for this row's slug
-    const person = allPeople.find(p => p.slug === row.slug);
-    if (!person) continue;
-    const personId = person.id;
-
-    const pledges = personPledges.get(personId) ?? [];
+    const pledges = personPledges.get(row.personId) ?? [];
 
     let pledgedCents = 0;
     for (const pledge of pledges) {
@@ -198,8 +198,15 @@ export default async function EquityPage() {
       pledgedCents += price * pledge.sharesPledged;
     }
 
+    // Leverage is only meaningful when the verified liquid stake is a
+    // material share of the baseline. Below that the denominator is noise
+    // and the ratio explodes (Bezos previously rendered as 3511.88x).
     const netEquityCents = Math.max(0, row.liquidCents - pledgedCents);
-    const leverageRatio = netEquityCents > 0 ? row.baselineCents / netEquityCents : null;
+    const liquidShare = row.baselineCents > 0 ? row.liquidCents / row.baselineCents : 0;
+    const leverageRatio =
+      netEquityCents > 0 && liquidShare >= 0.05 && pledgedCents > 0
+        ? row.baselineCents / netEquityCents
+        : null;
 
     row.pledgedCents = pledgedCents;
     row.leverageRatio = leverageRatio;
@@ -207,6 +214,7 @@ export default async function EquityPage() {
       ticker: p.ticker,
       shares: p.sharesPledged,
       source: p.source ?? "",
+      sourceType: (p.sourceType as "verified" | "unverified") ?? "unverified",
     }));
   }
 
@@ -229,8 +237,9 @@ export default async function EquityPage() {
           is often under 40% of the headline number.
         </p>
         <p className="text-sm text-fg-faint mt-3 max-w-2xl">
-          <span className="text-warning font-medium">Leverage blind spot:</span> Pledged shares reduce
-          reported 13F holdings but economic exposure remains. A margin call can force fire-sale
+          <span className="text-warning font-medium">Leverage blind spot:</span> Executives pledge shares as
+          collateral for personal loans — disclosed in DEF 14A proxy statements, not Form 4 or 13F.
+          Headline net-worth figures ignore it entirely. A margin call can force fire-sale
           liquidation, creating a feedback loop that net-worth models ignore.
         </p>
       </div>
@@ -239,11 +248,11 @@ export default async function EquityPage() {
       <div className="border border-border rounded-md bg-surface px-6 py-5 mb-8 flex items-center gap-12 flex-wrap">
         <div>
           <p className="text-xs uppercase tracking-widest text-fg-muted mb-1">Liquid total (top {rows.length})</p>
-          <p className="font-mono text-2xl font-medium text-fg">{formatB(totalLiquid / 1e9)}</p>
+          <p className="font-mono text-2xl font-medium text-fg">{formatB(totalLiquid / 1e11)}</p>
         </div>
         <div>
           <p className="text-xs uppercase tracking-widest text-fg-muted mb-1">Baseline total</p>
-          <p className="font-mono text-2xl font-medium text-fg">{formatB(totalBaseline / 1e9)}</p>
+          <p className="font-mono text-2xl font-medium text-fg">{formatB(totalBaseline / 1e11)}</p>
         </div>
         <div>
           <p className="text-xs uppercase tracking-widest text-fg-muted mb-1">Liquid fraction</p>
@@ -253,7 +262,7 @@ export default async function EquityPage() {
         </div>
         <div className="pl-8 border-l border-border">
           <p className="text-xs uppercase tracking-widest text-fg-muted mb-1">Pledged (est.)</p>
-          <p className="font-mono text-2xl font-medium text-warning">{formatB(totalPledged / 1e9)}</p>
+          <p className="font-mono text-2xl font-medium text-warning">{formatB(totalPledged / 1e11)}</p>
         </div>
       </div>
 
@@ -310,13 +319,15 @@ export default async function EquityPage() {
                   ))}
                 </td>
                 <td className="px-4 py-3 text-right font-mono font-medium text-fg">
-                  {row.liquidCents > 0 ? formatB(row.liquidCents / 1e9) : "—"}
+                  {row.liquidCents > 0 ? formatB(row.liquidCents / 1e11) : "—"}
                 </td>
                 <td className="px-4 py-3 text-right">
                   {row.liquidPct != null ? (
                     <span
                       className={`font-mono text-xs ${
-                        row.liquidPct >= 50
+                        row.liquidPct > 100
+                          ? "text-danger"
+                          : row.liquidPct >= 50
                           ? "text-success"
                           : row.liquidPct >= 25
                           ? "text-fg"
@@ -324,6 +335,14 @@ export default async function EquityPage() {
                       }`}
                     >
                       {row.liquidPct.toFixed(1)}%
+                      {row.liquidPct > 100 && (
+                        <span
+                          className="ml-1"
+                          title="Liquid equity exceeds baseline net worth — share count, price or baseline is wrong."
+                        >
+                          &#9888;
+                        </span>
+                      )}
                     </span>
                   ) : (
                     <span className="font-mono text-xs text-fg-faint">—</span>
@@ -332,10 +351,16 @@ export default async function EquityPage() {
                 <td className="px-4 py-3 text-right">
                   {row.pledgedCents > 0 ? (
                     <div>
-                      <span className="font-mono text-xs text-warning">{formatB(row.pledgedCents / 1e9)}</span>
+                      <span className="font-mono text-xs text-warning">{formatB(row.pledgedCents / 1e11)}</span>
                       <div className="text-xs text-fg-faint mt-1">
                         {row.pledges.map(p => (
-                          <div key={p.ticker} className="font-mono">{p.ticker}: {(p.shares / 1e6).toFixed(1)}M</div>
+                          <div key={p.ticker} className="font-mono flex items-center justify-end gap-1">
+                            <span>{p.ticker}: {(p.shares / 1e6).toFixed(1)}M</span>
+                            {p.sourceType === "verified"
+                              ? <span className="text-success" title="SEC filing source">✓</span>
+                              : <span className="text-warning" title="Estimated — no SEC filing found">?</span>
+                            }
+                          </div>
                         ))}
                       </div>
                     </div>

@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, uniqueIndex, index } from "drizzle-orm/sqlite-core";
 import { createId } from "@paralleldrive/cuid2";
 
 // Legacy table — kept for backwards compatibility
@@ -47,11 +47,31 @@ export const baselineEstimates = sqliteTable("baseline_estimates", {
   sourceId: text("source_id").notNull().references(() => sources.id),
   netWorthCents: integer("net_worth_cents").notNull(),
   asOf: text("as_of").notNull(),
+  /**
+   * The document that supports THIS claim, not the source in general.
+   * A `sources` row tells you who published the list; this resolves to the
+   * page or file where the individual figure can be checked. Nullable only
+   * because rows loaded before this column existed have to be backfilled from
+   * their raw capture — see scripts/backfill_baseline_source_url.ts.
+   */
+  sourceUrl: text("source_url"),
   rank: integer("rank"),
   rawPath: text("raw_path"),
   raw: text("raw"), // JSON string
   createdAt: text("created_at").notNull().default(""),
-});
+}, (t) => ({
+  /**
+   * The natural key. Without it `onConflictDoNothing` is a no-op (the PK is a
+   * cuid that can never collide) and re-running a loader silently doubles the
+   * table. With it, "loaders are additive" is enforced by the database.
+   */
+  uniqPersonSourceAsOf: uniqueIndex("ux_baseline_person_source_asof").on(
+    t.personId,
+    t.sourceId,
+    t.asOf
+  ),
+  idxSource: index("idx_baseline_source").on(t.sourceId),
+}));
 
 export type Source = typeof sources.$inferSelect;
 export type Person = typeof people.$inferSelect;
@@ -67,6 +87,7 @@ export const equityHoldings = sqliteTable("equity_holdings", {
   asOf: text("as_of").notNull(),
   estimated: integer("estimated").notNull().default(0),
   source: text("source"),
+  sourceUrl: text("source_url").notNull(),
   createdAt: text("created_at").notNull().default(""),
 });
 
@@ -77,6 +98,7 @@ export const stockSnapshots = sqliteTable("stock_snapshots", {
   priceCents: integer("price_cents").notNull(),
   asOf: text("as_of").notNull(),
   source: text("source"),
+  currency: text("currency").notNull().default("USD"),
   createdAt: text("created_at").notNull().default(""),
 });
 
@@ -95,7 +117,120 @@ export const pledgeHoldings = sqliteTable("pledge_holdings", {
   sharesPledged: integer("shares_pledged").notNull(),
   asOf: text("as_of").notNull(),
   source: text("source"), // e.g. "SEC 13F", "Form 4", "Bloomberg"
+  sourceUrl: text("source_url").notNull(),
+  evidenceText: text("evidence_text"),
+  filingId: text("filing_id"),
+  sourceType: text("source_type").notNull().default("unknown"), // "verified" | "estimated" | "unverified"
   createdAt: text("created_at").notNull().default(""),
 });
 
 export type PledgeHolding = typeof pledgeHoldings.$inferSelect;
+
+// Slice 2b: Securities registry — anchor for ticker/exchange/currency lookups
+export const securities = sqliteTable("securities", {
+  id: text("id").primaryKey(),
+  ticker: text("ticker").notNull(),
+  exchange: text("exchange").notNull(),
+  name: text("name"),
+  currency: text("currency").notNull(), // ISO 4217: USD, EUR, INR, GBP, …
+  cik: text("cik"), // SEC EDGAR CIK for US-listed securities
+  sourceUrl: text("source_url").notNull(),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+// Slice 2b: FX rates — frankfurter.app / ECB daily rates
+// Allows converting a holding's local-currency value to USD at the date of the snapshot.
+export const fxRates = sqliteTable("fx_rates", {
+  base: text("base").notNull(),        // ISO 4217, e.g. "INR"
+  quote: text("quote").notNull().default("USD"),
+  asOf: text("as_of").notNull(),       // YYYY-MM-DD
+  rate: real("rate").notNull(),        // 1 base = rate quote
+  sourceUrl: text("source_url").notNull(),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+// Slice 6: Asset→owner graph
+// Physical assets (real estate, vessels, aircraft, art) owned by people.
+// Company stakes are tracked separately in equity_holdings — do NOT use
+// asset_type='company' here. This separation is critical: a company's
+// market value is derived from share price × shares, while a mansion's
+// value is assessed. Mixing them distorts every total.
+export const assets = sqliteTable("assets", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  assetType: text("asset_type").notNull(), // 'real_estate' | 'vessel' | 'aircraft' | 'art' | 'other'
+  description: text("description"),
+  location: text("location"),
+  estimatedValueCents: integer("estimated_value_cents"),
+  sourceId: text("source_id").references(() => sources.id),
+  // Structural guarantee, not advice: an asset cannot exist without a
+  // resolvable citation. The loader already required this — the column was
+  // missing, so 36 fabricated rows landed with no provenance at all.
+  sourceUrl: text("source_url").notNull(),
+  lat: real("lat"),
+  lng: real("lng"),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export const ownershipLinks = sqliteTable("ownership_links", {
+  id: text("id").primaryKey(),
+  assetId: text("asset_id").notNull().references(() => assets.id, { onDelete: "cascade" }),
+  personId: text("person_id").notNull().references(() => people.id, { onDelete: "cascade" }),
+  ownershipPct: real("ownership_pct"), // 0–100, nullable for unclear splits
+  confidence: text("confidence").notNull(), // 'high' | 'medium' | 'low'
+  citation: text("citation"), // human-readable note ABOUT the source, not the source
+  sourceId: text("source_id").references(() => sources.id),
+  sourceUrl: text("source_url").notNull(),
+  asOf: text("as_of"),
+  createdAt: text("created_at").notNull().default(""),
+}, (t) => ({
+  // One person owns a given asset once. 35 duplicate pairs existed before this.
+  uniqAssetPerson: uniqueIndex("ux_ownership_asset_person").on(t.assetId, t.personId),
+}));
+
+export type Asset = typeof assets.$inferSelect;
+export type OwnershipLink = typeof ownershipLinks.$inferSelect;
+
+// Slice 8: Events — real-world events near owned assets
+export const events = sqliteTable("events", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  lat: real("lat"),
+  lng: real("lng"),
+  occurredAt: text("occurred_at").notNull(),
+  sourceId: text("source_id").references(() => sources.id),
+  sourceUrl: text("source_url"),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export type Event = typeof events.$inferSelect;
+
+// Slice 14: Event-Asset spatial links (R-tree bounding box + haversine)
+// Links earthquakes (lat/lng events) to nearby physical assets within range.
+export const eventAssetLinks = sqliteTable("event_asset_links", {
+  id: text("id").primaryKey(),
+  eventId: text("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
+  assetId: text("asset_id").notNull().references(() => assets.id, { onDelete: "cascade" }),
+  distanceKm: real("distance_km").notNull(),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+// Slice 14: Event Impact — benchmark-adjusted market moves
+// For each event-asset-link, captures the stock's return vs a market benchmark
+// on the event date. excess_pct = market_delta_pct - index_delta_pct.
+// Null results are explicit: no stock data, no benchmark data, or event outside range.
+export const eventImpacts = sqliteTable("event_impacts", {
+  id: text("id").primaryKey(),
+  eventAssetLinkId: text("event_asset_link_id").notNull().references(() => eventAssetLinks.id, { onDelete: "cascade" }),
+  ticker: text("ticker"), // the stock that moved (may be null for non-market events)
+  marketDeltaPct: real("market_delta_pct"), // stock return % on event date
+  indexDeltaPct: real("index_delta_pct"), // benchmark return % on event date
+  excessPct: real("excess_pct"), // market_delta_pct - index_delta_pct
+  impactNote: text("impact_note"), // human-readable summary
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export type EventAssetLink = typeof eventAssetLinks.$inferSelect;
+export type EventImpact = typeof eventImpacts.$inferSelect;

@@ -1,105 +1,1290 @@
 {
-  "version": "6",
+  "version": 7,
   "dialect": "sqlite",
-  "id": "8c3e9acd-2b14-40a0-964c-d2b741eddc07",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "baseline-1788031093422",
+  "prevId": "",
   "tables": {
-    "billionaires": {
-      "name": "billionaires",
+    "assets": {
+      "name": "assets",
+      "schema": "",
       "columns": {
         "id": {
           "name": "id",
-          "type": "text",
+          "type": "TEXT",
           "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
         },
         "name": {
           "name": "name",
-          "type": "text",
+          "type": "TEXT",
           "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "asset_type": {
+          "name": "asset_type",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "description": {
+          "name": "description",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "location": {
+          "name": "location",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "estimated_value_cents": {
+          "name": "estimated_value_cents",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "source_id": {
+          "name": "source_id",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "lat": {
+          "name": "lat",
+          "type": "REAL",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "lng": {
+          "name": "lng",
+          "type": "REAL",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+        }
+      },
+      "indexes": [
+        {
+          "name": "idx_assets_type",
+          "columns": []
+        },
+        {
+          "name": "idx_assets_location",
+          "columns": []
+        }
+      ]
+    },
+    "baseline_estimates": {
+      "name": "baseline_estimates",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "TEXT",
+          "primaryKey": true,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "person_id": {
+          "name": "person_id",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "source_id": {
+          "name": "source_id",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "net_worth_cents": {
+          "name": "net_worth_cents",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "as_of": {
+          "name": "as_of",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
         },
         "rank": {
           "name": "rank",
-          "type": "integer",
+          "type": "INTEGER",
           "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "raw_path": {
+          "name": "raw_path",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "raw": {
+          "name": "raw",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+        }
+      },
+      "indexes": [
+        {
+          "name": "idx_baseline_person_time",
+          "columns": []
+        }
+      ]
+    },
+    "billionaires": {
+      "name": "billionaires",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "TEXT",
+          "primaryKey": true,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "name": {
+          "name": "name",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "rank": {
+          "name": "rank",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
         },
         "prev_rank": {
           "name": "prev_rank",
-          "type": "integer",
+          "type": "INTEGER",
           "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
         },
         "source": {
           "name": "source",
-          "type": "text",
+          "type": "TEXT",
           "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
         },
         "industry": {
           "name": "industry",
-          "type": "text",
+          "type": "TEXT",
           "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
         },
         "country": {
           "name": "country",
-          "type": "text",
+          "type": "TEXT",
           "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
         },
         "estimated_wealth": {
           "name": "estimated_wealth",
-          "type": "real",
+          "type": "REAL",
           "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
         },
         "confirmed_wealth": {
           "name": "confirmed_wealth",
-          "type": "real",
+          "type": "REAL",
           "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
         },
         "liquidity_pct": {
           "name": "liquidity_pct",
-          "type": "real",
+          "type": "REAL",
           "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
         },
         "last_updated": {
           "name": "last_updated",
-          "type": "text",
+          "type": "TEXT",
           "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
+      "indexes": []
+    },
+    "equity_holdings": {
+      "name": "equity_holdings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "TEXT",
+          "primaryKey": true,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "person_id": {
+          "name": "person_id",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "ticker": {
+          "name": "ticker",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "exchange": {
+          "name": "exchange",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "shares": {
+          "name": "shares",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "as_of": {
+          "name": "as_of",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "estimated": {
+          "name": "estimated",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "0"
+        },
+        "source": {
+          "name": "source",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "source_url": {
+          "name": "source_url",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "''"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+        }
+      },
+      "indexes": [
+        {
+          "name": "idx_equity_person",
+          "columns": []
+        },
+        {
+          "name": "idx_equity_ticker",
+          "columns": []
+        }
+      ]
+    },
+    "event_asset_links": {
+      "name": "event_asset_links",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "TEXT",
+          "primaryKey": true,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "asset_id": {
+          "name": "asset_id",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "distance_km": {
+          "name": "distance_km",
+          "type": "REAL",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+        }
+      },
+      "indexes": []
+    },
+    "event_impacts": {
+      "name": "event_impacts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "TEXT",
+          "primaryKey": true,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "event_asset_link_id": {
+          "name": "event_asset_link_id",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "ticker": {
+          "name": "ticker",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "market_delta_pct": {
+          "name": "market_delta_pct",
+          "type": "REAL",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "index_delta_pct": {
+          "name": "index_delta_pct",
+          "type": "REAL",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "excess_pct": {
+          "name": "excess_pct",
+          "type": "REAL",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "impact_note": {
+          "name": "impact_note",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+        }
+      },
+      "indexes": []
+    },
+    "events": {
+      "name": "events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "TEXT",
+          "primaryKey": true,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "type": {
+          "name": "type",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "title": {
+          "name": "title",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "description": {
+          "name": "description",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "lat": {
+          "name": "lat",
+          "type": "REAL",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "lng": {
+          "name": "lng",
+          "type": "REAL",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "impact_note": {
+          "name": "impact_note",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "source_id": {
+          "name": "source_id",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "source_url": {
+          "name": "source_url",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+        }
+      },
+      "indexes": [
+        {
+          "name": "idx_events_type",
+          "columns": []
+        },
+        {
+          "name": "idx_events_occurred",
+          "columns": []
+        }
+      ]
+    },
+    "fx_rates": {
+      "name": "fx_rates",
+      "schema": "",
+      "columns": {
+        "base": {
+          "name": "base",
+          "type": "TEXT",
+          "primaryKey": true,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "quote": {
+          "name": "quote",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "'USD'"
+        },
+        "as_of": {
+          "name": "as_of",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "rate": {
+          "name": "rate",
+          "type": "REAL",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "source_url": {
+          "name": "source_url",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+        }
+      },
+      "indexes": []
+    },
+    "ownership_links": {
+      "name": "ownership_links",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "TEXT",
+          "primaryKey": true,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "asset_id": {
+          "name": "asset_id",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "person_id": {
+          "name": "person_id",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "ownership_pct": {
+          "name": "ownership_pct",
+          "type": "REAL",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "confidence": {
+          "name": "confidence",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "citation": {
+          "name": "citation",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "source_id": {
+          "name": "source_id",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "as_of": {
+          "name": "as_of",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+        }
+      },
+      "indexes": [
+        {
+          "name": "idx_ownership_asset",
+          "columns": []
+        },
+        {
+          "name": "idx_ownership_person",
+          "columns": []
+        }
+      ]
+    },
+    "people": {
+      "name": "people",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "TEXT",
+          "primaryKey": true,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "slug": {
+          "name": "slug",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "full_name": {
+          "name": "full_name",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "aliases": {
+          "name": "aliases",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": "'[]'"
+        },
+        "country": {
+          "name": "country",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "primary_org": {
+          "name": "primary_org",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "born_year": {
+          "name": "born_year",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "photo_url": {
+          "name": "photo_url",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "is_public_figure": {
+          "name": "is_public_figure",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "1"
+        },
+        "filing_cik": {
+          "name": "filing_cik",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+        }
+      },
+      "indexes": []
+    },
+    "pledge_holdings": {
+      "name": "pledge_holdings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "TEXT",
+          "primaryKey": true,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "person_id": {
+          "name": "person_id",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "ticker": {
+          "name": "ticker",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "exchange": {
+          "name": "exchange",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "shares_pledged": {
+          "name": "shares_pledged",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "as_of": {
+          "name": "as_of",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "source": {
+          "name": "source",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "source_url": {
+          "name": "source_url",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "''"
+        },
+        "evidence_text": {
+          "name": "evidence_text",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "filing_id": {
+          "name": "filing_id",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "source_type": {
+          "name": "source_type",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "'unknown'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+        }
+      },
+      "indexes": [
+        {
+          "name": "idx_pledge_person",
+          "columns": []
+        },
+        {
+          "name": "idx_pledge_ticker",
+          "columns": []
+        }
+      ]
+    },
+    "securities": {
+      "name": "securities",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "TEXT",
+          "primaryKey": true,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "ticker": {
+          "name": "ticker",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "exchange": {
+          "name": "exchange",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "name": {
+          "name": "name",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "currency": {
+          "name": "currency",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "cik": {
+          "name": "cik",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "source_url": {
+          "name": "source_url",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+        }
+      },
+      "indexes": []
+    },
+    "sources": {
+      "name": "sources",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "TEXT",
+          "primaryKey": true,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "name": {
+          "name": "name",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "url": {
+          "name": "url",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "license": {
+          "name": "license",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "attribution": {
+          "name": "attribution",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+        }
+      },
+      "indexes": []
+    },
+    "stock_snapshots": {
+      "name": "stock_snapshots",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "TEXT",
+          "primaryKey": true,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "ticker": {
+          "name": "ticker",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "exchange": {
+          "name": "exchange",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "price_cents": {
+          "name": "price_cents",
+          "type": "INTEGER",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "as_of": {
+          "name": "as_of",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "source": {
+          "name": "source",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 0,
+          "autoincrement": false,
+          "length": null,
+          "default": null
+        },
+        "currency": {
+          "name": "currency",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "'USD'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+        }
+      },
+      "indexes": [
+        {
+          "name": "idx_snap_ticker_time",
+          "columns": []
+        },
+        {
+          "name": "idx_snap_ticker_date",
+          "columns": []
+        }
+      ]
     }
-  },
-  "views": {},
-  "enums": {},
-  "_meta": {
-    "schemas": {},
-    "tables": {},
-    "columns": {}
-  },
-  "internal": {
-    "indexes": {}
   }
 }

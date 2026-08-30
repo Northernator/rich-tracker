@@ -38,3 +38,29 @@ You are working on **Track the Rich**, a multi-source billionaire net-worth cons
 - `src/lib/db/` — database layer, schema, seed
 - `src/lib/` — shared utilities and data fetching
 - `references/` — this skill's reference files (in `.zcode/skills/start-an-app/references/`)
+
+## Data integrity — non-negotiable
+
+**Never generate placeholder, synthetic, or example data for any table that
+represents real-world facts.** This includes net worths, share counts, pledges,
+assets, ownership links, prices and events.
+
+- If a source is unavailable, **fail loudly and leave the table empty.** Do not
+  fall back to invented values, and do not write a fabricated payload into
+  `data/raw/` — that directory is the audit trail.
+- **Every row in a claims table carries a resolvable `source_url`** that opens
+  the document supporting the claim. A 10-K does not evidence an individual's
+  share count; a prose sentence ("County Assessor confirms ownership") is not a
+  citation. If you cannot cite it, do not insert it.
+- **Loaders are additive.** Use `INSERT OR IGNORE` / `onConflictDoNothing` on a
+  natural key. Never `DELETE` then reload — that is how 60 days of real price
+  history was destroyed once already.
+- **No silent unit or currency assumptions.** An unknown currency is an error,
+  not USD. Money columns named `_cents` hold cents.
+- Sanity-check before insert: a personal holding cannot exceed the company's
+  outstanding shares, and verified liquid equity cannot exceed the baseline
+  net worth. Reject the row and log it.
+
+This project has had fabricated data introduced four separate times, each time
+better disguised than the last. The constraints in the schema exist to make that
+structurally impossible — do not work around them.
