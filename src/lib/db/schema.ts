@@ -98,9 +98,30 @@ export const stockSnapshots = sqliteTable("stock_snapshots", {
   priceCents: integer("price_cents").notNull(),
   asOf: text("as_of").notNull(),
   source: text("source"),
+  /**
+   * The provider name that produced this row. Persists a row's provenance past
+   * a provider switch: after migrating from yahoo to finnhub the old rows must
+   * still be attributable to yahoo.
+   */
   currency: text("currency").notNull().default("USD"),
+  /**
+   * Mirrors the adapter's `licence` at insert time. Same purpose as `source`:
+   * a row's legal footing survives a provider swap, and the public-safety check
+   * ("may this price be displayed?") reads this column, not live config.
+   */
+  licence: text("licence").notNull().default("unlicensed"),
   createdAt: text("created_at").notNull().default(""),
-});
+}, (t) => ({
+  /**
+   * The natural key. `onConflictDoNothing()` is a no-op against the cuid PK, so
+   * without this a re-run silently doubles the table. With it, "loaders are
+   * additive" is enforced by the database. The live table already carries
+   * idx_snap_ticker_date; declaring it here keeps the schema and the DB in
+   * agreement so future migrations generate cleanly.
+   */
+  uniqTickerAsOf: uniqueIndex("ux_stock_ticker_asof").on(t.ticker, t.asOf),
+  idxTickerDate: index("idx_snap_ticker_date").on(t.ticker, t.asOf),
+}));
 
 export type EquityHolding = typeof equityHoldings.$inferSelect;
 export type StockSnapshot = typeof stockSnapshots.$inferSelect;

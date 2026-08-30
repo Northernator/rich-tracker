@@ -1273,16 +1273,33 @@
           "autoincrement": false,
           "length": null,
           "default": "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+        },
+        "licence": {
+          "name": "licence",
+          "type": "TEXT",
+          "primaryKey": false,
+          "notNull": 1,
+          "autoincrement": false,
+          "length": null,
+          "default": "'unlicensed'"
         }
       },
       "indexes": [
         {
-          "name": "idx_snap_ticker_time",
-          "columns": []
+          "name": "ux_stock_ticker_asof",
+          "columns": [
+            "ticker",
+            "as_of"
+          ],
+          "unique": true
         },
         {
-          "name": "idx_snap_ticker_date",
-          "columns": []
+          "name": "idx_snap_ticker_time",
+          "columns": [
+            "ticker",
+            "as_of"
+          ],
+          "unique": false
         }
       ]
     }

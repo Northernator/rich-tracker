@@ -20,6 +20,13 @@ type HostConfig = { limit: number; windowMs: number };
 const SEC_CONFIG: HostConfig = { limit: 8, windowMs: 1000 };
 const COMPANIES_HOUSE_CONFIG: HostConfig = { limit: 550, windowMs: 5 * 60 * 1000 };
 const RTB_CONFIG: HostConfig = { limit: 20, windowMs: 1000 };
+// Finnhub free tier: 60 calls/minute. Stay under it; the shared default of
+// 2/sec would otherwise reach 120/min and earn a 429.
+const FINNHUB_CONFIG: HostConfig = { limit: 55, windowMs: 60 * 1000 };
+// Alpha Vantage free tier: 5 calls/minute and 25/day. The per-minute side lives
+// here; the daily side is a hard budget in prices/alphavantage.ts, because a
+// throttle there must fail loudly instead of reading as "no data".
+const ALPHAVANTAGE_CONFIG: HostConfig = { limit: 5, windowMs: 60 * 1000 };
 const DEFAULT_CONFIG: HostConfig = { limit: 2, windowMs: 1000 };
 
 function getHostConfig(hostname: string): HostConfig {
@@ -29,6 +36,12 @@ function getHostConfig(hostname: string): HostConfig {
   }
   if (h === "api.company-information.service.gov.uk") {
     return COMPANIES_HOUSE_CONFIG;
+  }
+  if (h === "finnhub.io" || h.endsWith(".finnhub.io")) {
+    return FINNHUB_CONFIG;
+  }
+  if (h === "www.alphavantage.co" || h === "alphavantage.co") {
+    return ALPHAVANTAGE_CONFIG;
   }
   if (
     h === "cdn.statically.io" ||

@@ -1,4 +1,5 @@
 import type { PriceProvider, FxProvider } from "./types";
+import { assertLicence } from "./licences";
 import { yahooProvider } from "./prices/yahoo";
 import { finnhubProvider } from "./prices/finnhub";
 import { alphavantageProvider } from "./prices/alphavantage";
@@ -20,6 +21,12 @@ export function getPriceProvider(): PriceProvider {
       `Unknown PRICE_PROVIDER "${raw}". Valid options: ${VALID_PRICE_OPTIONS}`
     );
   }
+
+  // Refuses to hand back a provider whose adapter claims a licence the register
+  // cannot evidence. This is what stops an unconfirmed "display-permitted" from
+  // being written into stock_snapshots.licence and onto a public page.
+  assertLicence(provider);
+
   return provider;
 }
 
@@ -34,4 +41,5 @@ export function getFxProvider(): FxProvider {
 
 // Re-exports for direct use and testing
 export { yahooProvider, finnhubProvider, alphavantageProvider, frankfurterProvider };
+export { canDisplayPublicly, LICENCE_REGISTER, licenceFor } from "./licences";
 export const _priceProviders = PRICE_PROVIDERS;

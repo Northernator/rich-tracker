@@ -8,6 +8,13 @@
       "when": 1788400000000,
       "tag": "0000_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1767000000000,
+      "tag": "0014_snapshot_licence",
+      "breakpoints": true
     }
   ]
 }
