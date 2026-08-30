@@ -15,6 +15,7 @@
 
 # next.js
 /.next/
+/.next-build/
 /out/
 
 # production
@@ -45,6 +46,7 @@ data/
 
 # agent harness state
 .mimosa/
+.workbuddy-ai/
 
 # unrelated project that was dropped into this workspace
 # (personal finance app with its own package.json/node_modules/dist)
