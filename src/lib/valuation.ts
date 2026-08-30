@@ -66,6 +66,8 @@ export interface ResolvedHolding {
   priceUsdCents: number | null;
   currency: string;
   fxError: string | null;
+  /** Document that states this share count — rendered as the row's citation. */
+  sourceUrl: string;
 }
 
 export interface ValuationResult {
@@ -143,6 +145,7 @@ export function computeValuation(params: ComputeParams): ValuationResult {
       priceUsdCents,
       currency: priceCurrency ?? "USD",
       fxError,
+      sourceUrl: h.sourceUrl,
     });
 
     holdingInputs.push({

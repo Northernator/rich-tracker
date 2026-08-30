@@ -69,6 +69,8 @@ interface PersonRow {
     currency: string;
     estimated: number;
     fxError: string | null;
+    /** Document stating this share count — the ticker renders as a citation link. */
+    sourceUrl: string;
   }>;
   pledges: Array<{ ticker: string; shares: number; source: string; sourceType: "verified" | "unverified" }>;
   sparkData: Array<{ date: string; price: number }>;
@@ -109,12 +111,9 @@ export default async function EquityPage() {
     .from(equityHoldings)
     .orderBy(asc(equityHoldings.id));
 
-  // All people
+  // All people — every public figure renders, with "no verified holdings"
+  // for those without a filing-derived holding.
   const allPeople = await db.select().from(people).where(eq(people.isPublicFigure, 1));
-  const peopleById = new Map<string, typeof allPeople[number]>();
-  for (const p of allPeople) {
-    peopleById.set(p.id, p);
-  }
 
   // Latest baseline per person (max as_of), carrying the row id for inputs.
   const latestBaselines = (await db
@@ -180,15 +179,37 @@ export default async function EquityPage() {
 
   const rows: PersonRow[] = [];
 
-  for (const [personId, holds] of personHoldings) {
-    const person = peopleById.get(personId);
-    if (!person) continue;
+  for (const person of allPeople) {
+    const holds = personHoldings.get(person.id) ?? [];
+    const baseline = baselineByPerson.get(person.id) ?? null;
 
-    const baseline = baselineByPerson.get(personId) ?? null;
+    // A person without a filing-derived holding has no verified liquid
+    // equity. That is an honest result and renders as "no verified
+    // holdings" — it is not a zero, and never an estimate.
+    if (holds.length === 0) {
+      rows.push({
+        personId: person.id,
+        slug: person.slug,
+        name: person.fullName,
+        country: person.country ?? "",
+        org: person.primaryOrg ?? "",
+        liquidCents: 0,
+        baselineCents: baseline?.netWorthCents ?? 0,
+        liquidPct: null,
+        pledgedCents: 0,
+        leverageRatio: null,
+        fxErrors: [],
+        tickers: [],
+        pledges: [],
+        sparkData: [],
+      });
+      continue;
+    }
+
     const valuation = computeValuation({
-      personId,
+      personId: person.id,
       holdings: holds,
-      pledges: personPledges.get(personId) ?? [],
+      pledges: personPledges.get(person.id) ?? [],
       latestPrices: latestByTicker,
       securityIds: securityIdsByTicker,
       baseline,
@@ -234,7 +255,7 @@ export default async function EquityPage() {
     }));
 
     rows.push({
-      personId,
+      personId: person.id,
       slug: person.slug,
       name: person.fullName,
       country: person.country ?? "",
@@ -246,7 +267,7 @@ export default async function EquityPage() {
       leverageRatio,
       fxErrors: valuation.fxErrors,
       tickers: valuation.holdings,
-      pledges: (personPledges.get(personId) ?? []).map((p) => ({
+      pledges: (personPledges.get(person.id) ?? []).map((p) => ({
         ticker: p.ticker,
         shares: p.sharesPledged,
         source: p.source ?? "",
@@ -261,6 +282,7 @@ export default async function EquityPage() {
   const totalLiquid = rows.reduce((s, r) => s + r.liquidCents, 0);
   const totalBaseline = rows.reduce((s, r) => s + r.baselineCents, 0);
   const totalPledged = rows.reduce((s, r) => s + r.pledgedCents, 0);
+  const verifiedCount = rows.filter((r) => r.tickers.length > 0).length;
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-12">
@@ -285,7 +307,9 @@ export default async function EquityPage() {
       {/* Summary bar */}
       <div className="border border-border rounded-md bg-surface px-6 py-5 mb-8 flex items-center gap-12 flex-wrap">
         <div>
-          <p className="text-xs uppercase tracking-widest text-fg-muted mb-1">Liquid total (top {rows.length})</p>
+          <p className="text-xs uppercase tracking-widest text-fg-muted mb-1">
+            Liquid total ({verifiedCount} of {rows.length} verified)
+          </p>
           <p className="font-mono text-2xl font-medium text-fg">{formatB(totalLiquid / 1e11)}</p>
         </div>
         <div>
@@ -330,15 +354,27 @@ export default async function EquityPage() {
                   <div className="text-xs text-fg-faint">{row.org}</div>
                 </td>
                 <td className="px-4 py-3">
-                  {row.tickers.map((t) => (
-                    <span key={t.ticker} className="font-mono text-xs">
-                      {t.ticker}
-                      {t.estimated === 1 && <span className="text-fg-faint ml-1">~</span>}
-                      {row.tickers.indexOf(t) < row.tickers.length - 1 && (
-                        <span className="text-fg-muted">,</span>
-                      )}
-                    </span>
-                  ))}
+                  {row.tickers.length === 0 ? (
+                    <span className="text-xs text-fg-faint italic">no verified holdings</span>
+                  ) : (
+                    row.tickers.map((t) => (
+                      <span key={t.ticker} className="font-mono text-xs whitespace-nowrap">
+                        <a
+                          href={t.sourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-accent hover:underline"
+                          title={`Filing stating this share count: ${t.sourceUrl}`}
+                        >
+                          {t.ticker}
+                        </a>
+                        {t.estimated === 1 && <span className="text-fg-faint ml-1">~</span>}
+                        {row.tickers.indexOf(t) < row.tickers.length - 1 && (
+                          <span className="text-fg-muted">,</span>
+                        )}
+                      </span>
+                    ))
+                  )}
                 </td>
                 <td className="px-4 py-3 text-right font-mono text-xs text-fg-muted">
                   {row.tickers.map((t) => (
@@ -467,9 +503,11 @@ export default async function EquityPage() {
 
       <div className="mt-6 text-xs text-fg-faint leading-relaxed">
         <p>
-          Source: SEC 13F filings, AMF disclosures, CNMV filings, and Bloomberg/Forbes estimates for
-          approximated holdings. Stock prices from Yahoo Finance (daily close). Baseline net worth
-          from Forbes Real-Time Billionaires.
+          Holdings come only from SEC Form 3/4/5 ownership filings — each share count appears in
+          the filing cited on its row. People whose stakes are held through private entities,
+          trusts, or non-US registries have no individual-level filing, and are shown here with
+          no verified holdings rather than an estimate. Stock prices from Yahoo Finance (daily
+          close). Baseline net worth from Forbes Real-Time Billionaires.
         </p>
         <p className="mt-2">
           The &ldquo;liquid&rdquo; figure is the portion of reported net worth that can be verified
