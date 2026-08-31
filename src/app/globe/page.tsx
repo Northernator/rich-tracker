@@ -66,7 +66,7 @@ interface GlobeData {
 // ---------------------------------------------------------------------------
 
 // Server-side country centers lookup (imported once)
-const { COUNTRY_CENTERS } = require("@/lib/geo/country-centers");
+import { COUNTRY_CENTERS } from "@/lib/geo/country-centers";
 
 async function fetchGlobeData(): Promise<GlobeData> {
   // Latest estimate per person

@@ -55,3 +55,8 @@ data/
 # scratch directory pending manual deletion. Contains a file named "nul",
 # which is a reserved device name on Windows and cannot be indexed by git.
 /_to_delete/
+
+# scratch: throwaway probe scripts written while investigating a data source,
+# plus captured tsc/eslint output. Untracked by design; safe to delete locally.
+scripts/_probe_*
+*_out*.txt

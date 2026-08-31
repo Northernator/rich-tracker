@@ -159,7 +159,7 @@ async function loadInsiderTransactions() {
       const xmlMatch = filingText.match(/<TEXT>([\s\S]*)<\/TEXT>/);
       if (!xmlMatch) continue;
 
-      let xml = xmlMatch[1]
+      const xml = xmlMatch[1]
         .replace(/&amp;/g, "&")
         .replace(/&lt;/g, "<")
         .replace(/&gt;/g, ">")

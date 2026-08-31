@@ -5,7 +5,7 @@
  * 1. Drop and recreate data/app.db
  * 2. Apply the baseline SQL schema directly via better-sqlite3
  * 3. Load raw data: slice1 (rtb-api people + estimates)
- * 4. Load curated data: slice2 (holdings + Yahoo prices), slice5 (pledges), slice6 (assets)
+ * 4. Load curated data: slice2 (holdings + Yahoo prices), slice6 (assets)
  * 5. Seed demo data: slice6b (Forbes estimates), slice8 (events)
  *
  * Run: npm run rebuild
@@ -131,15 +131,10 @@ try {
   console.warn("  slice2 failed:", err instanceof Error ? err.message : err);
 }
 
-console.log("  slice5 — pledge holdings...");
-try {
-  execSync(`pnpm exec tsx src/lib/db/load_slice5.ts`, {
-    cwd: process.cwd(),
-    stdio: "inherit",
-  });
-} catch (err) {
-  console.warn("  slice5 failed:", err instanceof Error ? err.message : err);
-}
+// slice5 (the invented pledge loader) has been deleted — pledged shares come
+// only from DEF 14A proxy statements via load_pledges.ts (network, run
+// separately: `npm run pledges:sec`). An empty pledge table is the honest
+// default here.
 
 console.log("  slice6 — physical assets...");
 try {

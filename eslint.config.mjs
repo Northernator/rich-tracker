@@ -13,6 +13,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // `elite/` is a separate, self-contained project with its own package.json,
+    // vite config and toolchain. `elite/dist` is its build output. It is not
+    // part of this Next.js app and is already excluded in tsconfig.json —
+    // linting it here just drowns real findings in minified bundle noise.
+    "elite/**",
   ]),
 ]);
 

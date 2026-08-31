@@ -10,6 +10,7 @@ import {
 import { loadFxLookup } from "@/lib/db/fx";
 import { computeValuation } from "@/lib/valuation";
 import { sql, asc, eq, or } from "drizzle-orm";
+import PledgeCell from "@/components/PledgeCell";
 
 function formatCents(cents: number): string {
   return `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -57,7 +58,6 @@ interface PersonRow {
   baselineCents: number;
   liquidPct: number | null;
   pledgedCents: number;
-  leverageRatio: number | null; // baseline / (liquid - pledged)
   /** Holdings whose local-currency value could not be converted (no FX rate). */
   fxErrors: Array<{ ticker: string; message: string }>;
   tickers: Array<{
@@ -72,7 +72,17 @@ interface PersonRow {
     /** Document stating this share count — the ticker renders as a citation link. */
     sourceUrl: string;
   }>;
-  pledges: Array<{ ticker: string; shares: number; source: string; sourceType: "verified" | "unverified" }>;
+  pledges: Array<{
+    ticker: string;
+    shares: number;
+    /** Percentage of the person's verified stake in this ticker that is pledged, or null when the stake is unverified. */
+    pctOfStake: number | null;
+    /** The verbatim sentence from the DEF 14A — must be byte-for-byte in the cited document. */
+    evidenceText: string;
+    source: string;
+    sourceUrl: string;
+    sourceType: "verified" | "unverified";
+  }>;
   sparkData: Array<{ date: string; price: number }>;
 }
 
@@ -182,11 +192,36 @@ export default async function EquityPage() {
   for (const person of allPeople) {
     const holds = personHoldings.get(person.id) ?? [];
     const baseline = baselineByPerson.get(person.id) ?? null;
+    const pledges = personPledges.get(person.id) ?? [];
 
     // A person without a filing-derived holding has no verified liquid
     // equity. That is an honest result and renders as "no verified
-    // holdings" — it is not a zero, and never an estimate.
+    // holdings" — it is not a zero, and never an estimate. A pledge can
+    // still be disclosed (DEF 14A) and is surfaced on its own, never
+    // subtracted.
     if (holds.length === 0) {
+      // Pledges are collateral, not a dollar liability — a person with a
+      // disclosed pledge but no verified stake still gets the quoted sentence.
+      const pctByTicker = new Map<string, number>(); // no verified stake → %
+      const pledgeRows = pledges.map((p) => ({
+        ticker: p.ticker,
+        shares: p.sharesPledged,
+        pctOfStake: pctByTicker.get(p.ticker) ?? null,
+        evidenceText: p.evidenceText ?? "",
+        source: p.source ?? "",
+        sourceUrl: p.sourceUrl ?? "",
+        sourceType: (p.sourceType as "verified" | "unverified") ?? "unverified",
+      }));
+      // Dollar value of pledged shares at latest price (collateral value,
+      // informational only — never subtracted from net worth).
+      let pledgedCents = 0;
+      for (const p of pledges) {
+        const latest = latestByTicker.get(p.ticker);
+        if (!latest) continue;
+        const fxRate = latest.currency === "USD" ? 1 : fx.get(latest.currency, latest.asOf);
+        if (fxRate == null) continue;
+        pledgedCents += Math.round(latest.priceCents * fxRate) * p.sharesPledged;
+      }
       rows.push({
         personId: person.id,
         slug: person.slug,
@@ -196,11 +231,10 @@ export default async function EquityPage() {
         liquidCents: 0,
         baselineCents: baseline?.netWorthCents ?? 0,
         liquidPct: null,
-        pledgedCents: 0,
-        leverageRatio: null,
+        pledgedCents,
         fxErrors: [],
         tickers: [],
-        pledges: [],
+        pledges: pledgeRows,
         sparkData: [],
       });
       continue;
@@ -209,7 +243,7 @@ export default async function EquityPage() {
     const valuation = computeValuation({
       personId: person.id,
       holdings: holds,
-      pledges: personPledges.get(person.id) ?? [],
+      pledges,
       latestPrices: latestByTicker,
       securityIds: securityIdsByTicker,
       baseline,
@@ -221,15 +255,26 @@ export default async function EquityPage() {
     const baselineCents = valuation.baselineCents;
     const liquidPct = baselineCents > 0 ? (liquidCents / baselineCents) * 100 : null;
 
-    // Leverage is only meaningful when the verified liquid stake is a
-    // material share of the baseline. Below that the denominator is noise
-    // and the ratio explodes (Bezos previously rendered as 3511.88x).
-    const netEquityCents = Math.max(0, liquidCents - pledgedCents);
-    const liquidShare = baselineCents > 0 ? liquidCents / baselineCents : 0;
-    const leverageRatio =
-      netEquityCents > 0 && liquidShare >= 0.05 && pledgedCents > 0
-        ? baselineCents / netEquityCents
-        : null;
+    // % of each verified stake that is pledged as collateral — the honest
+    // framing. Pledges are never subtracted from net worth.
+    const holdingSharesByTicker = new Map<string, number>();
+    for (const h of holds) {
+      const prev = holdingSharesByTicker.get(h.ticker) ?? 0;
+      holdingSharesByTicker.set(h.ticker, prev + h.shares);
+    }
+    const pledgeRows = pledges.map((p) => {
+      const stake = holdingSharesByTicker.get(p.ticker) ?? 0;
+      const pctOfStake = stake > 0 ? (p.sharesPledged / stake) * 100 : null;
+      return {
+        ticker: p.ticker,
+        shares: p.sharesPledged,
+        pctOfStake,
+        evidenceText: p.evidenceText ?? "",
+        source: p.source ?? "",
+        sourceUrl: p.sourceUrl ?? "",
+        sourceType: (p.sourceType as "verified" | "unverified") ?? "unverified",
+      };
+    });
 
     // 30-day history for sparkline (combine all tickers for this person)
     const tickerList = holds.map((h) => h.ticker);
@@ -264,15 +309,9 @@ export default async function EquityPage() {
       baselineCents,
       liquidPct,
       pledgedCents,
-      leverageRatio,
       fxErrors: valuation.fxErrors,
       tickers: valuation.holdings,
-      pledges: (personPledges.get(person.id) ?? []).map((p) => ({
-        ticker: p.ticker,
-        shares: p.sharesPledged,
-        source: p.source ?? "",
-        sourceType: (p.sourceType as "verified" | "unverified") ?? "unverified",
-      })),
+      pledges: pledgeRows,
       sparkData,
     });
   }
@@ -323,7 +362,7 @@ export default async function EquityPage() {
           </p>
         </div>
         <div className="pl-8 border-l border-border">
-          <p className="text-xs uppercase tracking-widest text-fg-muted mb-1">Pledged (est.)</p>
+          <p className="text-xs uppercase tracking-widest text-fg-muted mb-1">Pledged collateral</p>
           <p className="font-mono text-2xl font-medium text-warning">{formatB(totalPledged / 1e11)}</p>
         </div>
       </div>
@@ -341,7 +380,6 @@ export default async function EquityPage() {
               <th className="text-right px-4 py-3 text-xs uppercase tracking-widest text-fg-muted font-medium">Liquid</th>
               <th className="text-right px-4 py-3 text-xs uppercase tracking-widest text-fg-muted font-medium">of Total</th>
               <th className="text-right px-4 py-3 text-xs uppercase tracking-widest text-fg-muted font-medium">Pledged</th>
-              <th className="text-right px-4 py-3 text-xs uppercase tracking-widest text-fg-muted font-medium">Leverage</th>
               <th className="text-right px-4 py-3 text-xs uppercase tracking-widest text-fg-muted font-medium w-32">30-Day</th>
             </tr>
           </thead>
@@ -455,30 +493,8 @@ export default async function EquityPage() {
                   )}
                 </td>
                 <td className="px-4 py-3 text-right">
-                  {row.pledgedCents > 0 ? (
-                    <div>
-                      <span className="font-mono text-xs text-warning">{formatB(row.pledgedCents / 1e11)}</span>
-                      <div className="text-xs text-fg-faint mt-1">
-                        {row.pledges.map(p => (
-                          <div key={p.ticker} className="font-mono flex items-center justify-end gap-1">
-                            <span>{p.ticker}: {(p.shares / 1e6).toFixed(1)}M</span>
-                            {p.sourceType === "verified"
-                              ? <span className="text-success" title="SEC filing source">✓</span>
-                              : <span className="text-warning" title="Estimated — no SEC filing found">?</span>
-                            }
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <span className="font-mono text-xs text-fg-faint">—</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  {row.leverageRatio != null ? (
-                    <span className={`font-mono text-xs ${row.leverageRatio > 2 ? "text-danger" : row.leverageRatio > 1.5 ? "text-warning" : "text-success"}`}>
-                      {row.leverageRatio.toFixed(2)}x
-                    </span>
+                  {row.pledges.length > 0 ? (
+                    <PledgeCell pledges={row.pledges} pledgedCents={row.pledgedCents} />
                   ) : (
                     <span className="font-mono text-xs text-fg-faint">—</span>
                   )}
@@ -513,6 +529,12 @@ export default async function EquityPage() {
           The &ldquo;liquid&rdquo; figure is the portion of reported net worth that can be verified
           by multiplying known share counts by public market prices. The remainder — private stakes,
           real estate, art, trusts — is either unverified or moves on different timescales.
+        </p>
+        <p className="mt-2">
+          Pledged shares come only from DEF 14A proxy statements (the beneficial-ownership table
+          footnotes) — each row quotes the exact sentence and links the filing. Pledged shares are
+          collateral, not a dollar liability: loan size is almost never disclosed, so they are
+          surfaced as &ldquo;% of stake pledged&rdquo; and never subtracted from net worth.
         </p>
       </div>
     </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 
 const GlobeView = dynamic(() => import("@/components/GlobeView"), { ssr: false });
 
@@ -61,9 +62,9 @@ export default function GlobePageClient({ countries, assets, arcs, events }: Glo
             {countries.reduce((s, c) => s + c.count, 0)} billionaires · ${countries.reduce((s, c) => s + c.totalWealthB, 0).toFixed(0)}B total · {assets.length} tracked assets
           </p>
         </div>
-        <a href="/" className="text-sm text-white/40 hover:text-white transition-colors">
+        <Link href="/" className="text-sm text-white/40 hover:text-white transition-colors">
           ← Rankings
-        </a>
+        </Link>
       </div>
       <GlobeView countries={countries} assets={assets} arcs={arcs} events={events} />
     </>

@@ -274,7 +274,7 @@ for (const link of links) {
     continue;
   }
 
-  let ownerImpactRows: Parameters<typeof insertImpact.run>[0][] = [];
+  const ownerImpactRows: Parameters<typeof insertImpact.run>[0][] = [];
 
   for (const owner of owners) {
     const holdings = ownerHoldings.get(owner.personId);

@@ -136,7 +136,7 @@ const insert = sqlite.prepare(`
 `);
 
 let seeded = 0;
-let unmatched: string[] = [];
+const unmatched: string[] = [];
 
 for (const p of withValues) {
   const valueB = FORBES[p.full_name];
