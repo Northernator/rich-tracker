@@ -9,7 +9,7 @@ import {
   eventAssetLinks,
   eventImpacts,
 } from "@/lib/db/schema";
-import { sql, asc, eq, ne, inArray } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -60,6 +60,14 @@ interface NearbyAsset {
   impacts: EventImpact[];
 }
 
+interface FilingGroup {
+  count: number;
+  ticker?: string;
+  totalShares: number;
+  personName: string;
+  filedAt: string;
+}
+
 interface EventRow {
   id: string;
   type: EventType;
@@ -72,6 +80,8 @@ interface EventRow {
   sourceId: string | null;
   sourceUrl: string | null;
   nearbyAssets: NearbyAsset[];
+  /** Present when several insider_sell rows share one SEC filing (source_url). */
+  filingGroup?: FilingGroup;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,6 +112,70 @@ function formatB(cents: number): string {
   if (billions >= 1) return `$${billions.toFixed(1)}B`;
   const millions = cents / 100 / 1e6;
   return `$${millions.toFixed(0)}M`;
+}
+
+/**
+ * Collapse multiple insider_sell rows that belong to the same SEC Form 4 filing
+ * (sharing a source_url) into a single card. The rows are near-identical
+ * transaction lines from one filing day; rendering them individually produces
+ * hundreds of duplicate cards. Earthquakes, SEC enforcement actions and pledges
+ * each carry distinct source_urls, so they are left as individual cards.
+ */
+const INSIDER_SHARE_RE = /^(.+?) sells ([\d,]+) (\w+) shares$/;
+
+function groupInsiderFilings(rows: EventRow[]): EventRow[] {
+  const byFiling = new Map<string, EventRow[]>();
+  const others: EventRow[] = [];
+
+  for (const r of rows) {
+    if (r.type === "insider_sell" && r.sourceUrl) {
+      const arr = byFiling.get(r.sourceUrl);
+      if (arr) arr.push(r);
+      else byFiling.set(r.sourceUrl, [r]);
+    } else {
+      others.push(r);
+    }
+  }
+
+  const grouped: EventRow[] = [];
+  for (const [url, members] of byFiling) {
+    if (members.length === 1) {
+      others.push(members[0]);
+      continue;
+    }
+
+    let personName = members[0].title;
+    let ticker: string | undefined;
+    let totalShares = 0;
+    let minDate = members[0].occurredAt;
+    for (const m of members) {
+      if (m.occurredAt < minDate) minDate = m.occurredAt;
+      const mm = m.title.match(INSIDER_SHARE_RE);
+      if (mm) {
+        personName = mm[1];
+        ticker = mm[3];
+        totalShares += parseInt(mm[2].replace(/,/g, ""), 10);
+      }
+    }
+
+    const rep = members[0];
+    grouped.push({
+      ...rep,
+      id: `filing:${url}`,
+      title: ticker ? `${personName} — ${ticker} insider sales` : `${personName} insider sales`,
+      description:
+        `Form 4 insider filing · ${members.length} transactions` +
+        (ticker ? ` · ${ticker}` : "") +
+        (totalShares > 0 ? ` · ${totalShares.toLocaleString("en-US")} shares total` : ""),
+      occurredAt: minDate,
+      filingGroup: { count: members.length, ticker, totalShares, personName, filedAt: minDate },
+      nearbyAssets: [],
+    });
+  }
+
+  const out = [...others, ...grouped];
+  out.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
+  return out;
 }
 
 function typeLabel(type: EventType): string {
@@ -309,7 +383,7 @@ async function fetchEvents(): Promise<EventRow[]> {
     result.push({ ...evt, type: evt.type as EventType, nearbyAssets: nearby });
   }
 
-  return result;
+  return groupInsiderFilings(result);
 }
 
 // ---------------------------------------------------------------------------
@@ -367,6 +441,12 @@ export default async function EventsPage() {
                     day: "numeric",
                   })}
                 </p>
+                {evt.filingGroup && (
+                  <p className="text-xs text-fg-faint font-mono mt-2">
+                    Form 4 · {evt.filingGroup.count} txns
+                    {evt.filingGroup.ticker ? ` · ${evt.filingGroup.ticker}` : ""}
+                  </p>
+                )}
               </div>
 
               <div className="flex-1 min-w-0">
@@ -533,7 +613,7 @@ export default async function EventsPage() {
             {evt.lat != null && evt.lng != null && evt.nearbyAssets.length === 0 && (
               <div className="border-t border-border px-5 py-3">
                 <p className="text-xs text-fg-faint">
-                  No owned assets within {PROXIMITY_RADIUS_KM} km of this event.
+                  No owned assets within {PROXIMITY_RADIUS_KM} km — no detectable market effect.
                 </p>
               </div>
             )}
@@ -545,7 +625,9 @@ export default async function EventsPage() {
         <p>
           Event locations are approximate. Proximity is calculated using the
           haversine formula. Tickers are highlighted in accent color when an
-          event fires near one of the owner&rsquo;s assets.
+          event fires near one of the owner&rsquo;s assets. When no owned asset
+          lies within range, the event is reported as having no detectable
+          market effect — co-occurrence only, never causation.
         </p>
       </div>
     </div>
