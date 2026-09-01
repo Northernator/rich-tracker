@@ -345,3 +345,113 @@ export const valuationSnapshots = sqliteTable("valuation_snapshots", {
 }));
 
 export type ValuationSnapshot = typeof valuationSnapshots.$inferSelect;
+
+// ===========================================================================
+// Chunk 11 — the offshore layer (ICIJ Offshore Leaks, ODbL).
+//
+// Kept separate from `entity_edges` (Chunk 10) on purpose: that table is locked
+// down by CHECK constraints forbidding the ICIJ vocabulary. The staging tables
+// hold the RAW nodes/relationships verbatim (audit trail); `offshore_edges`
+// holds the resolved person→entity→entity graph, one hop per row so confidence
+// multiplies along the path, exactly like Chunk 10.
+// ===========================================================================
+
+/** Raw ICIJ entity nodes (verbatim capture — the audit trail). */
+export const icijEntities = sqliteTable("icij_entities", {
+  nodeId: text("node_id").primaryKey(),
+  name: text("name"),
+  jurisdiction: text("jurisdiction"),
+  jurisdictionDescription: text("jurisdiction_description"),
+  companyType: text("company_type"),
+  address: text("address"),
+  sourceId: text("source_id"), // leak name: 'Panama Papers' / 'Paradise Papers' / …
+  validUntil: text("valid_until"),
+  countryCodes: text("country_codes"),
+  status: text("status"),
+  note: text("note"),
+  raw: text("raw"),
+  loadedAt: text("loaded_at").notNull().default(""),
+});
+
+/** Raw ICIJ officer nodes. No birth year in this dataset — see loader. */
+export const icijOfficers = sqliteTable("icij_officers", {
+  nodeId: text("node_id").primaryKey(),
+  name: text("name"),
+  countryCodes: text("country_codes"),
+  jurisdiction: text("jurisdiction"),
+  jurisdictionDescription: text("jurisdiction_description"),
+  sourceId: text("source_id"),
+  validUntil: text("valid_until"),
+  status: text("status"),
+  note: text("note"),
+  raw: text("raw"),
+  loadedAt: text("loaded_at").notNull().default(""),
+});
+
+/** Raw ICIJ relationships (edges). start/end reference node_id values. */
+export const icijRelationships = sqliteTable(
+  "icij_relationships",
+  {
+    startId: text("start_id").notNull(),
+    endId: text("end_id").notNull(),
+    relType: text("rel_type").notNull(),
+    sourceId: text("source_id"),
+    validUntil: text("valid_until"),
+    status: text("status"),
+    note: text("note"),
+    raw: text("raw"),
+    loadedAt: text("loaded_at").notNull().default(""),
+  },
+  (t) => ({
+    uxRel: uniqueIndex("ux_icij_rel").on(t.startId, t.endId, t.relType, t.sourceId),
+  })
+);
+
+/** The strict officer→person resolution, recorded so it can be audited. */
+export const icijOfficerMatches = sqliteTable("icij_officer_matches", {
+  officerNodeId: text("officer_node_id").primaryKey(),
+  personId: text("person_id").notNull().references(() => people.id, { onDelete: "cascade" }),
+  basis: text("basis").notNull(), // 'identifier' | 'name+birth-year' | 'name-only'
+  confidence: real("confidence").notNull(),
+  matchedName: text("matched_name"),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+/** Resolved offshore graph — one hop per row, confidence multiplies along path. */
+export const offshoreEdges = sqliteTable(
+  "offshore_edges",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    edgeType: text("edge_type").notNull(), // 'officer_of_entity' | 'entity_relationship'
+    fromEntityType: text("from_entity_type").notNull(),
+    fromEntityId: text("from_entity_id").notNull(),
+    fromLabel: text("from_label").notNull(),
+    toEntityType: text("to_entity_type").notNull(),
+    toEntityId: text("to_entity_id").notNull(),
+    toLabel: text("to_label").notNull(),
+    confidence: real("confidence").notNull(),
+    sourceId: text("source_id").references(() => sources.id),
+    sourceUrl: text("source_url").notNull(),
+    detail: text("detail"),
+    asOf: text("as_of"),
+    createdAt: text("created_at").notNull().default(""),
+  },
+  (t) => ({
+    uxOffshoreEdge: uniqueIndex("ux_offshore_edge").on(
+      t.edgeType,
+      t.fromEntityType,
+      t.fromEntityId,
+      t.toEntityType,
+      t.toEntityId,
+      t.sourceUrl
+    ),
+    ixOffshoreFrom: index("ix_offshore_from").on(t.fromEntityType, t.fromEntityId),
+    ixOffshoreTo: index("ix_offshore_to").on(t.toEntityType, t.toEntityId),
+  })
+);
+
+export type IcijEntity = typeof icijEntities.$inferSelect;
+export type IcijOfficer = typeof icijOfficers.$inferSelect;
+export type IcijRelationship = typeof icijRelationships.$inferSelect;
+export type IcijOfficerMatch = typeof icijOfficerMatches.$inferSelect;
+export type OffshoreEdge = typeof offshoreEdges.$inferSelect;
