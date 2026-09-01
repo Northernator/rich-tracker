@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { assets, ownershipLinks, people, sources } from "@/lib/db/schema";
-import { eq, asc, sql } from "drizzle-orm";
+import { eq, asc, sql, and } from "drizzle-orm";
 import Database from "better-sqlite3";
 import { join } from "path";
 import { loadChains, type OwnershipChain } from "@/lib/db/chains";
@@ -197,7 +197,9 @@ const assetRows = (await db
   })
   .from(assets)
   .leftJoin(ownershipLinks, eq(assets.id, ownershipLinks.assetId))
-  .leftJoin(people, eq(ownershipLinks.personId, people.id))
+  // GDPR gate: only surface owners who are public figures. A non-public-figure
+  // owner must not appear on this page even if an ownership link exists.
+  .leftJoin(people, and(eq(ownershipLinks.personId, people.id), eq(people.isPublicFigure, 1)))
   .orderBy(asc(assets.assetType), asc(assets.name))) as Array<{
   id: string;
   name: string;

@@ -59,15 +59,25 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <main>{children}</main>
         <footer className="border-t border-border mt-16">
           <div className="max-w-6xl mx-auto px-6 py-8 text-xs text-fg-faint space-y-3">
-            <p>
+            <p className="text-fg-muted">
               Estimates are compiled from third-party sources. They are not authoritative
               and should not be treated as definitive statements of fact.
-              See <Link href="/terms" className="text-fg-muted hover:text-fg transition-colors">Terms of Use</Link>
-              {' '}and <Link href="/privacy" className="text-fg-muted hover:text-fg transition-colors">Privacy Policy</Link>.
+              <strong className="text-fg"> Not investment advice.</strong> See{" "}
+              <Link href="/terms" className="text-fg-muted hover:text-fg transition-colors">Terms of Use</Link>
+              {" "}and <Link href="/privacy" className="text-fg-muted hover:text-fg transition-colors">Privacy Policy</Link>.
             </p>
-            <p>
-              © {new Date().getFullYear()} Track the Rich. Open-source under MIT.
+            <p className="flex flex-wrap gap-x-4 gap-y-1">
+              <Link href="/dispute" className="text-fg-muted hover:text-fg transition-colors">
+                Dispute this figure
+              </Link>
+              <Link href="/sources" className="text-fg-muted hover:text-fg transition-colors">
+                Sources &amp; licences
+              </Link>
+              <Link href="/methodology" className="text-fg-muted hover:text-fg transition-colors">
+                Methodology
+              </Link>
             </p>
+            <p>© {new Date().getFullYear()} Track the Rich. Open-source under MIT.</p>
           </div>
         </footer>
       </body>

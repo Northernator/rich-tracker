@@ -22,6 +22,17 @@ export default function TermsPage() {
           do not agree, please do not use this service.
         </p>
 
+        <div className="border border-border rounded-md bg-surface px-5 py-4 my-2">
+          <p className="text-fg font-medium">Not investment advice.</p>
+          <p className="mt-1">
+            Track the Rich is a data-visualization and research tool. Nothing on this
+            site is investment, financial, legal, or tax advice, nor a recommendation
+            or solicitation to buy, sell, or hold any security or asset. Do not make
+            investment decisions based on these estimates. Consult a qualified
+            professional.
+          </p>
+        </div>
+
         <h2 className="font-serif text-xl font-semibold text-fg mt-10 mb-4">
           Nature of the Data
         </h2>

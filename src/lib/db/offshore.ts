@@ -79,6 +79,9 @@ WITH RECURSIVE chain(node_id, person_id, depth, confidence, hop_conf, path, visi
   FROM offshore_edges oe
   JOIN people p ON p.id = oe.from_entity_id
   WHERE oe.edge_type = 'officer_of_entity'
+    -- GDPR gate: only public figures may seed an offshore chain. A private
+    -- individual (is_public_figure = 0) is never the root of a published chain.
+    AND p.is_public_figure = 1
     AND (:personId IS NULL OR p.id = :personId)
   UNION ALL
   SELECT

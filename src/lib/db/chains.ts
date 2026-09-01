@@ -152,18 +152,26 @@ export async function loadChains(limit = 100): Promise<OwnershipChain[]> {
   const personIds = [...new Set(personEdges.map((e) => e.fromEntityId))];
   const personRows = personIds.length
     ? ((await db
-        .select({ id: people.id, slug: people.slug })
+        .select({ id: people.id, slug: people.slug, isPublicFigure: people.isPublicFigure })
         .from(people)
         .where(inArray(people.id, personIds))
-        .execute()) as Array<{ id: string; slug: string }>)
+        .execute()) as Array<{ id: string; slug: string; isPublicFigure: number }>)
     : [];
   const slugById = new Map<string, string>();
-  for (const p of personRows) slugById.set(p.id, p.slug);
+  // GDPR gate: only public figures may surface in a chain. Seed control edges
+  // are filtered to this set so a private individual is never the terminal node.
+  const publicFigureIds = new Set<string>();
+  for (const p of personRows) {
+    slugById.set(p.id, p.slug);
+    if (p.isPublicFigure === 1) publicFigureIds.add(p.id);
+  }
 
   const chains: OwnershipChain[] = [];
   for (const propEdge of propertyEdges) {
-    const controlEdges = byCompany.get(propEdge.fromEntityId);
-    if (!controlEdges) continue;
+    const controlEdges = (byCompany.get(propEdge.fromEntityId) ?? []).filter((e) =>
+      publicFigureIds.has(e.fromEntityId)
+    );
+    if (controlEdges.length === 0) continue;
 
     for (const controlEdge of controlEdges) {
       const propertyHop = toHop(propEdge);

@@ -62,6 +62,11 @@ export default async function PersonProfilePage({
 
   if (!person) notFound();
 
+  // UK GDPR gate: this site only publishes data about public figures. A person
+  // marked is_public_figure = 0 (a private individual) must never be reachable
+  // through a profile URL, even with a guessed slug.
+  if (person.isPublicFigure !== 1) notFound();
+
   const baselines = await db
     .select()
     .from(baselineEstimates)
@@ -213,6 +218,16 @@ export default async function PersonProfilePage({
           . Estimates are compiled from third-party sources and are not authoritative.
         </p>
       )}
+
+      <p className="text-xs text-fg-faint mt-6">
+        Think a figure here is wrong?{" "}
+        <Link
+          href={`/dispute?slug=${encodeURIComponent(person.slug)}`}
+          className="text-fg-muted hover:text-accent transition-colors underline"
+        >
+          Dispute this figure →
+        </Link>
+      </p>
     </div>
   );
 }
