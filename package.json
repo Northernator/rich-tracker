@@ -13,6 +13,8 @@
     "holdings:sec": "pnpm exec tsx src/lib/db/load_sec_holdings.ts",
     "pledges:sec": "pnpm exec tsx src/lib/db/load_pledges.ts",
     "verify:pledges": "pnpm exec tsx scripts/verify_pledges.ts",
+    "aircraft:faa": "pnpm exec tsx src/lib/db/load_aircraft.ts",
+    "verify:aircraft": "pnpm exec tsx scripts/verify_aircraft.ts",
     "snapshot": "pnpm exec tsx src/lib/db/snapshot.ts",
     "cron": "pnpm exec tsx src/lib/cron/worker.ts",
     "fix:data": "node scripts/fix_data.mjs",
