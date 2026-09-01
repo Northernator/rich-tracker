@@ -13,16 +13,18 @@ interface CountryData {
 }
 
 interface AssetPoint {
-  lat: number;
-  lng: number;
+  assetId: string;
+  lat: number | null;
+  lng: number | null;
   name: string;
-  valueB: number;
-  owner: string;
-  slug: string;
+  valueCents: number | null;
+  ownerName: string;
+  ownerSlug: string;
   assetType: string;
   confidence: string;
-  ownershipPct: number;
+  ownershipPct: number | null;
   location: string;
+  sourceUrl: string;
 }
 
 interface ArcRoute {
@@ -45,28 +47,58 @@ interface EventPoint {
   sourceId: string;
 }
 
+interface OwnerCard {
+  slug: string;
+  name: string;
+  liveTotalCents: number;
+  verifiability: number | null;
+  pledgePct: number | null;
+}
+
 interface GlobePageClientProps {
   countries: CountryData[];
   assets: AssetPoint[];
   arcs: ArcRoute[];
   events: EventPoint[];
+  assetCount: number;
+  owners: OwnerCard[];
+  eventTypes: string[];
 }
 
-export default function GlobePageClient({ countries, assets, arcs, events }: GlobePageClientProps) {
+export default function GlobePageClient({
+  countries,
+  assets,
+  arcs,
+  events,
+  assetCount,
+  owners,
+  eventTypes,
+}: GlobePageClientProps) {
+  const totalBillionaires = countries.reduce((s, c) => s + c.count, 0);
+  const totalWealthB = countries.reduce((s, c) => s + c.totalWealthB, 0);
+
   return (
     <>
       <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between border-b border-white/10">
         <div>
           <h1 className="font-serif text-2xl font-semibold tracking-tight">Global Distribution</h1>
           <p className="text-sm text-white/40 mt-0.5">
-            {countries.reduce((s, c) => s + c.count, 0)} billionaires · ${countries.reduce((s, c) => s + c.totalWealthB, 0).toFixed(0)}B total · {assets.length} tracked assets
+            {totalBillionaires} billionaires · ${totalWealthB.toFixed(0)}B total · {assetCount} tracked assets
           </p>
         </div>
         <Link href="/" className="text-sm text-white/40 hover:text-white transition-colors">
           ← Rankings
         </Link>
       </div>
-      <GlobeView countries={countries} assets={assets} arcs={arcs} events={events} />
+      <GlobeView
+        countries={countries}
+        assets={assets}
+        arcs={arcs}
+        events={events}
+        assetCount={assetCount}
+        owners={owners}
+        eventTypes={eventTypes}
+      />
     </>
   );
 }

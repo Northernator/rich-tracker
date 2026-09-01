@@ -1,9 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+/* eslint-disable @typescript-eslint/no-explicit-any -- globe.gl's fluent API
+   is dynamically typed; its accessor callbacks receive opaque datum objects. */
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import Globe from "globe.gl";
 import type { GlobeInstance } from "globe.gl";
 import { getCountryCenter } from "@/lib/geo/country-centers";
+
+// Fixed once at module load and used only for the coarse event time filters
+// (6m / 1y). Kept out of render so we never call an impure function per paint.
+const NOW_MS = Date.now();
 
 // ---------------------------------------------------------------------------
 // Types
@@ -17,16 +24,18 @@ interface CountryData {
 }
 
 interface AssetPoint {
-  lat: number;
-  lng: number;
+  assetId: string;
+  lat: number | null;
+  lng: number | null;
   name: string;
-  valueB: number;
-  owner: string;
-  slug: string;
+  valueCents: number | null;
+  ownerName: string;
+  ownerSlug: string;
   assetType: string;
   confidence: string;
-  ownershipPct: number;
+  ownershipPct: number | null;
   location: string;
+  sourceUrl: string;
 }
 
 interface ArcRoute {
@@ -47,6 +56,14 @@ interface EventPoint {
   type: string;
   occurredAt: string;
   sourceId: string;
+}
+
+interface OwnerCard {
+  slug: string;
+  name: string;
+  liveTotalCents: number;
+  verifiability: number | null;
+  pledgePct: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -70,18 +87,44 @@ function getOwnerColor(slug: string): string {
   return OWNER_COLORS[slug] ?? "#94a3b8";
 }
 
+/** Apply an alpha to a #rrggbb hex string. Returns rgba(). */
+function hexToRgba(hex: string, alpha: number): string {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!m) return hex;
+  const r = parseInt(m[1], 16);
+  const g = parseInt(m[2], 16);
+  const b = parseInt(m[3], 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+const EVENT_TYPE_COLORS: Record<string, string> = {
+  earthquake: "#f97316",
+  insider_sell: "#38bdf8",
+  sec_enforcement: "#ef4444",
+  pledge: "#eab308",
+  regulation: "#f59e0b",
+  lawsuit: "#ec4899",
+  product_launch: "#22c55e",
+  market_crash: "#ef4444",
+};
+
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  earthquake: "Earthquake",
+  insider_sell: "Insider sell",
+  sec_enforcement: "SEC enforcement",
+  pledge: "Pledge",
+  regulation: "Regulation",
+  lawsuit: "Lawsuit",
+  product_launch: "Product launch",
+  market_crash: "Market crash",
+};
+
 function eventTypeColor(type: string): string {
-  const map: Record<string, string> = {
-    earthquake: "#f97316",
-    insider_sell: "#38bdf8",
-    sec_enforcement: "#ef4444",
-    pledge: "#eab308",
-    regulation: "#f59e0b",
-    lawsuit: "#ec4899",
-    product_launch: "#22c55e",
-    market_crash: "#ef4444",
-  };
-  return map[type] ?? "#94a3b8";
+  return EVENT_TYPE_COLORS[type] ?? "#94a3b8";
+}
+
+function eventTypeLabel(type: string): string {
+  return EVENT_TYPE_LABELS[type] ?? type;
 }
 
 function confidenceColor(confidence: string): string {
@@ -89,29 +132,38 @@ function confidenceColor(confidence: string): string {
   return map[confidence] ?? "#94a3b8";
 }
 
-function assetTypeColor(type: string): string {
-  const map: Record<string, string> = {
-    real_estate: "#d4a017",
-    vessel: "#4d9de0",
-    aircraft: "#e8c547",
-    art: "#7c3aed",
-    company: "#22c55e",
-    other: "#94a3b8",
-  };
-  return map[type] ?? "#94a3b8";
+// Fixed radius for assets whose value is unknown (NULL). Never guess a size.
+const NULL_VALUE_RADIUS = 1.2;
+
+function assetRadius(valueCents: number | null): number {
+  if (valueCents == null) return NULL_VALUE_RADIUS;
+  const valueUsd = valueCents / 100;
+  // sqrt scaling keeps a $65M jet visible and a $10B estate from swallowing the globe
+  const r = Math.sqrt(valueUsd / 1e9) * 3 + 0.5;
+  return Math.max(1, Math.min(6, r));
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Formatting helpers
 // ---------------------------------------------------------------------------
 
-function formatB(cents: number): string {
-  return `$${(cents / 100 / 1e9).toFixed(1)}B`;
+function formatCents(cents: number): string {
+  const d = cents / 100;
+  if (d >= 1e9) return `$${(d / 1e9).toFixed(1)}B`;
+  if (d >= 1e6) return `$${(d / 1e6).toFixed(0)}M`;
+  return `$${Math.round(d).toLocaleString()}`;
 }
 
-function formatBShort(cents: number): string {
-  const b = cents / 100 / 1e9;
-  return b >= 100 ? `$${b.toFixed(0)}B` : `$${b.toFixed(1)}B`;
+function formatVerifiability(v: number | null): string {
+  if (v == null) return "n/a";
+  const pct = v * 100;
+  const warn = pct > 100 ? " ⚠" : "";
+  return `${pct.toFixed(1)}%${warn}`;
+}
+
+function formatPledge(pct: number | null): string {
+  if (pct == null) return "n/a";
+  return `${pct.toFixed(1)}%`;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,9 +175,21 @@ interface GlobeViewProps {
   assets: AssetPoint[];
   arcs: ArcRoute[];
   events: EventPoint[];
+  assetCount: number;
+  owners: OwnerCard[];
+  eventTypes: string[];
 }
 
-export default function GlobeView({ countries, assets, arcs, events }: GlobeViewProps) {
+export default function GlobeView({
+  countries,
+  assets,
+  arcs,
+  events,
+  assetCount,
+  owners,
+  eventTypes,
+}: GlobeViewProps) {
+  const router = useRouter();
   const canvasRef = useRef<HTMLDivElement>(null);
   const globeRef = useRef<GlobeInstance | null>(null);
   const [selected, setSelected] = useState<{ type: string; data: any } | null>(null);
@@ -135,6 +199,13 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
   const [showAssets, setShowAssets] = useState(true);
   const [showEvents, setShowEvents] = useState(true);
   const [showPeople, setShowPeople] = useState(true);
+  const [followMoney, setFollowMoney] = useState(false);
+
+  const ownerMap = useMemo(() => {
+    const m = new Map<string, OwnerCard>();
+    for (const o of owners) m.set(o.slug, o);
+    return m;
+  }, [owners]);
 
   const totalWealth = countries.reduce((s, c) => s + c.totalWealthB, 0);
   const totalCount = countries.reduce((s, c) => s + c.count, 0);
@@ -143,18 +214,26 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
   const filteredEvents = events.filter((e) => {
     if (timeFilter === "all") return true;
     const date = new Date(e.occurredAt);
-    if (timeFilter === "6m") return date > new Date(Date.now() - 180 * 86400000);
-    if (timeFilter === "1y") return date > new Date(Date.now() - 365 * 86400000);
+    if (timeFilter === "6m") return date > new Date(NOW_MS - 180 * 86400000);
+    if (timeFilter === "1y") return date > new Date(NOW_MS - 365 * 86400000);
     return true;
   });
+
+  // Only assets with real coordinates can be plotted. Assets without coords
+  // (e.g. FAA aircraft, which carry a tail number not a lat/lng) are listed in
+  // the sidebar but are never placed on the globe — we do not geocode them.
+  const plottableAssets = useMemo(
+    () => assets.filter((a) => a.lat != null && a.lng != null),
+    [assets],
+  );
 
   // Build arcs from assets if none provided
   const computedArcs: ArcRoute[] = arcs.length > 0
     ? arcs
-    : (assets
+    : (plottableAssets
         .map((a) => {
           const ownerCenter = getCountryCenter(
-            countries.find((c) => c.people.some((p) => p.name === a.owner))?.country ?? null
+            countries.find((c) => c.people.some((p) => p.name === a.ownerName))?.country ?? null,
           );
           if (!ownerCenter || a.lat == null || a.lng == null) return null;
           return {
@@ -162,15 +241,15 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
             sourceLng: a.lng,
             targetLat: ownerCenter.lat,
             targetLng: ownerCenter.lng,
-            sourceOwner: a.owner,
+            sourceOwner: a.ownerName,
             assetName: a.name,
-            valueB: a.valueB,
+            valueB: a.valueCents ? a.valueCents / 100 / 1e9 : 0,
             confidence: a.confidence,
           };
         })
         .filter((a): a is NonNullable<typeof a> => a !== null));
 
-  // Build data arrays
+  // Country points (country cluster layer)
   const countryPoints = countries
     .map((c) => {
       const center = getCountryCenter(c.country);
@@ -194,22 +273,23 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
     })
     .filter(Boolean);
 
-  const assetBubbles = assets.map((a) => ({
-    lat: a.lat,
-    lng: a.lng,
+  // Asset points — coloured by OWNER, sized by value (NULL value → fixed small)
+  const assetBubbles = plottableAssets.map((a) => ({
+    lat: a.lat!,
+    lng: a.lng!,
     name: a.name,
-    valueB: a.valueB,
-    owner: a.owner,
-    slug: a.slug,
+    valueCents: a.valueCents,
+    ownerName: a.ownerName,
+    ownerSlug: a.ownerSlug,
     assetType: a.assetType,
     confidence: a.confidence,
     ownershipPct: a.ownershipPct,
     location: a.location,
-    color: assetTypeColor(a.assetType),
-    ownerColor: getOwnerColor(a.slug),
-    radius: Math.max(1, Math.min(6, Math.sqrt(a.valueB) * 0.3)),
+    radius: assetRadius(a.valueCents),
+    ownerColor: getOwnerColor(a.ownerSlug || ""),
   }));
 
+  // Event rings — only the event types actually present in the data
   const eventPoints = filteredEvents.map((e) => ({
     lat: e.lat,
     lng: e.lng,
@@ -230,30 +310,14 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
     valueB: a.valueB,
     confidence: a.confidence,
     color: getOwnerColor(
-      a.sourceOwner.toLowerCase().replace(/\s+/g, "-")
+      a.sourceOwner.toLowerCase().replace(/\s+/g, "-"),
     ),
   }));
 
-  useEffect(() => {
-    if (!canvasRef.current) return;
-
-    // Cast Globe to any for the constructor since types are tricky
-    const GlobeClass = Globe as unknown as new (
-      container: HTMLElement,
-      config?: { waitForGlobeReady?: boolean; animateIn?: boolean }
-    ) => GlobeInstance;
-
-    const globe = new GlobeClass(canvasRef.current, {});
-
-    // Set globe image after construction
-    (globe as any)
-      .globeImageUrl("/textures/earth-night.jpg")
-      .bumpImageUrl("/textures/earth-topology.png")
-      .showGraticules(true)
-      .backgroundColor("rgba(0,0,0,0)");
-
-    // Apply layers
-    (globe as any)
+  // ---- globe.gl layer application (factored so toggles can re-apply) ---------
+  function applyLayers(g: GlobeInstance) {
+    // Country clusters
+    (g as any)
       .pointsData(showPeople ? countryPoints : [])
       .pointColor((d: any) => d.color)
       .pointRadius((d: any) => d.radius)
@@ -272,7 +336,8 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
         if (point) setSelected({ type: "country", data: point });
       });
 
-    (globe as any)
+    // Ownership arcs
+    (g as any)
       .arcsData(showArcs ? arcData : [])
       .arcColor((d: any) => d.color)
       .arcDashLength(0.4)
@@ -290,28 +355,56 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
         else setHovered(null);
       });
 
-    (globe as any)
+    // Asset points — owner colour, value-sized, dimmed when "follow the money"
+    // is on and the asset is not linked to a tracked person.
+    (g as any)
       .pointsData(showAssets ? assetBubbles : [])
-      .pointColor((d: any) => d.color)
+      .pointColor((d: any) => {
+        const tracked = !!d.ownerSlug;
+        if (followMoney && !tracked) return hexToRgba(d.ownerColor, 0.12);
+        return d.ownerColor;
+      })
       .pointRadius((d: any) => d.radius)
-      .pointAltitude((d: any) => 0.02)
-      .pointLabel((d: any) => `
-        <div style="font-size:11px;color:#fff;font-family:monospace;">
-          <strong>${d.name}</strong><br/>
-          ${d.owner}<br/>
-          <span style="color:${d.ownerColor}">${formatBShort(d.valueB * 100 * 1e9)}</span><br/>
-          ${d.assetType} · ${d.confidence}
-        </div>
-      `)
+      .pointAltitude((d: any) => {
+        const tracked = !!d.ownerSlug;
+        if (followMoney && !tracked) return 0.005;
+        return 0.02;
+      })
+      .pointLabel((d: any) => {
+        const owner = ownerMap.get(d.ownerSlug);
+        const valueStr = d.valueCents == null
+          ? "value unknown"
+          : formatCents(d.valueCents);
+        const ownerBlock = owner
+          ? `
+            <div style="margin-top:4px;border-top:1px solid #444;padding-top:4px;">
+              <span style="color:#94a3b8;">Owner:</span> <strong>${owner.name}</strong><br/>
+              <span style="color:#94a3b8;">Live total:</span> ${formatCents(owner.liveTotalCents)}<br/>
+              <span style="color:#94a3b8;">Verifiability:</span> ${formatVerifiability(owner.verifiability)}<br/>
+              <span style="color:#94a3b8;">Pledged:</span> ${formatPledge(owner.pledgePct)}
+            </div>`
+          : "";
+        return `
+          <div style="font-size:11px;color:#fff;font-family:monospace;">
+            <strong>${d.name}</strong><br/>
+            ${d.ownerName} · <span style="color:${d.ownerColor}">${valueStr}</span><br/>
+            ${d.assetType} · ${d.confidence}
+            ${ownerBlock}
+          </div>
+        `;
+      })
       .onPointHover((d: any) => {
         if (d) setHovered({ type: "asset", data: d });
         else setHovered(null);
       })
       .onPointClick((d: any) => {
-        if (d) setSelected({ type: "asset", data: d });
+        if (d && d.ownerSlug) {
+          router.push(`/person/${d.ownerSlug}`);
+        }
       });
 
-    (globe as any)
+    // Event rings
+    (g as any)
       .ringsData(showEvents ? eventPoints : [])
       .ringLat((d: any) => d.lat)
       .ringLng((d: any) => d.lng)
@@ -319,6 +412,28 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
       .ringRepeatPeriod(0)
       .ringMaxRadius(8)
       .ringPropagationSpeed(1);
+  }
+
+  useEffect(() => {
+    if (!canvasRef.current) return;
+
+    const GlobeClass = Globe as unknown as new (
+      container: HTMLElement,
+      config?: { waitForGlobeReady?: boolean; animateIn?: boolean },
+    ) => GlobeInstance;
+
+    const globe = new GlobeClass(canvasRef.current, {});
+
+    // Local textures only — never a CDN. Keeps the app offline-capable and
+    // free of third-party runtime dependencies.
+    (globe as any)
+      .globeImageUrl("/textures/earth-night.jpg")
+      .bumpImageUrl("/textures/earth-topology.png")
+      .showGraticules(true)
+      .backgroundColor("rgba(0,0,0,0)");
+
+    globeRef.current = globe;
+    applyLayers(globe);
 
     // Controls
     const controls = globe.controls();
@@ -328,8 +443,6 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
       controls.enableZoom = true;
       controls.enablePan = true;
     }
-
-    globeRef.current = globe;
 
     // Resize handler
     const handleResize = () => {
@@ -344,22 +457,19 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
       window.removeEventListener("resize", handleResize);
       if (globeRef.current) {
         globeRef.current._destructor();
+        globeRef.current = null;
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update layers when toggles change
+  // Re-apply layers when toggles change
   useEffect(() => {
     const g = globeRef.current;
     if (!g) return;
-
-    (g as any)
-      .pointsData(showPeople ? countryPoints : [])
-      .arcsData(showArcs ? arcData : [])
-      .pointsData(showAssets ? assetBubbles : [])
-      .ringsData(showEvents ? eventPoints : []);
-  }, [showArcs, showAssets, showEvents, showPeople]);
+    applyLayers(g);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showArcs, showAssets, showEvents, showPeople, followMoney, timeFilter]);
 
   return (
     <div className="flex h-[calc(100vh-65px)] bg-[#0a0a0a]">
@@ -373,8 +483,13 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
           <div className="text-xs uppercase tracking-widest text-white/40 mb-2">Global View</div>
           <div className="font-mono text-2xl text-amber-400">${totalWealth.toFixed(0)}B</div>
           <div className="text-xs text-white/40 mt-1">
-            {totalCount} billionaire{totalCount === 1 ? "" : "s"} · {countries.length} countries · {assets.length} tracked asset{assets.length === 1 ? "" : "s"}
+            {totalCount} billionaire{totalCount === 1 ? "" : "s"} · {countries.length} countries · {assetCount} tracked asset{assetCount === 1 ? "" : "s"}
           </div>
+          {plottableAssets.length < assetCount && (
+            <div className="text-[11px] text-white/30 mt-1">
+              {plottableAssets.length} with coordinates · {assetCount - plottableAssets.length} unmapped
+            </div>
+          )}
         </div>
 
         {/* Layer toggles */}
@@ -383,7 +498,7 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
           <div className="space-y-1.5">
             {[
               { key: "showPeople", label: "Country Clusters", count: countries.length },
-              { key: "showAssets", label: "Tracked Assets", count: assets.length },
+              { key: "showAssets", label: "Tracked Assets", count: assetCount },
               { key: "showArcs", label: "Ownership Arcs", count: computedArcs.length },
               { key: "showEvents", label: "Events", count: filteredEvents.length },
             ].map(({ key, label, count }) => {
@@ -404,7 +519,6 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
                     else if (key === "showArcs") setShowArcs(!showArcs);
                     else setShowEvents(!showEvents);
                   }}
-                  id={`layer-${key}`}
                   className={`w-full text-left px-3 py-1.5 rounded text-xs transition-colors flex items-center justify-between ${
                     isActive ? "bg-white/10" : "hover:bg-white/5"
                   }`}
@@ -414,6 +528,28 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
                 </button>
               );
             })}
+          </div>
+
+          {/* Follow the money */}
+          <button
+            onClick={() => setFollowMoney(!followMoney)}
+            className={`w-full mt-2 text-left px-3 py-1.5 rounded text-xs transition-colors flex items-center justify-between ${
+              followMoney ? "bg-amber-500/20 text-amber-200" : "hover:bg-white/5 text-white/70"
+            }`}
+          >
+            <span>Follow the money</span>
+            <span
+              className={`w-8 h-4 rounded-full relative flex-shrink-0 ${followMoney ? "bg-amber-400" : "bg-white/20"}`}
+            >
+              <span
+                className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${
+                  followMoney ? "translate-x-4" : "translate-x-0.5"
+                }`}
+              />
+            </span>
+          </button>
+          <div className="text-[11px] text-white/30 mt-1">
+            Dims assets not linked to a tracked person.
           </div>
         </div>
 
@@ -457,10 +593,10 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
             {selected?.type === "asset" && (
               <>
                 <div className="font-mono text-base text-amber-400 mb-1">
-                  {formatBShort(selected.data.valueB * 100 * 1e9)}
+                  {selected.data.valueCents == null ? "value unknown" : formatCents(selected.data.valueCents)}
                 </div>
                 <div className="text-xs text-white/80 mb-1">{selected.data.name}</div>
-                <div className="text-xs text-white/50">{selected.data.owner}</div>
+                <div className="text-xs text-white/50">{selected.data.ownerName}</div>
                 <div className="text-xs text-white/40 mt-1">
                   {selected.data.assetType} · {selected.data.confidence}
                 </div>
@@ -483,7 +619,7 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
                 <div className="font-mono text-sm text-white mb-1">{hovered.data.assetName}</div>
                 <div className="text-xs text-white/60">{hovered.data.sourceOwner}</div>
                 <div className="text-xs text-white/40">
-                  {formatBShort(hovered.data.valueB * 100 * 1e9)}
+                  {formatCents((hovered.data.valueB ?? 0) * 100 * 1e9)}
                 </div>
                 <div
                   className="text-xs mt-1"
@@ -493,6 +629,37 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {/* Assets list — every real asset, clickable to its owner's profile.
+            Assets without coordinates are unmapped but still listed honestly. */}
+        {assets.length > 0 && (
+          <div className="p-3 border-t border-white/10">
+            <div className="text-xs uppercase tracking-widest text-white/40 mb-2">Assets</div>
+            <div className="space-y-1">
+              {assets.map((a) => {
+                return (
+                  <button
+                    key={a.assetId}
+                    onClick={() => a.ownerSlug && router.push(`/person/${a.ownerSlug}`)}
+                    className="w-full text-left px-2 py-1.5 rounded hover:bg-white/5 transition-colors flex items-start gap-2"
+                  >
+                    <span
+                      className="w-2 h-2 rounded-full mt-1 flex-shrink-0"
+                      style={{ backgroundColor: getOwnerColor(a.ownerSlug || "") }}
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-xs text-white/80 truncate">{a.name}</span>
+                      <span className="block text-[11px] text-white/40 truncate">
+                        {a.ownerName}
+                        {a.lat == null || a.lng == null ? " · unmapped" : ""}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -508,7 +675,7 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
                   if (center && globeRef.current) {
                     (globeRef.current as any).pointOfView(
                       { lat: center.lat, lng: center.lng, altitude: 2.5 },
-                      800
+                      800,
                     );
                   }
                   setSelected({ type: "country", data: c });
@@ -548,49 +715,28 @@ export default function GlobeView({ countries, assets, arcs, events }: GlobeView
           </div>
         </div>
 
-        {/* Legend */}
+        {/* Legend — only event types present in the data */}
         <div className="p-3 border-t border-white/10 mt-auto">
           <div className="text-xs uppercase tracking-widest text-white/40 mb-2">Legend</div>
           <div className="space-y-1 text-xs text-white/50">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block"></span>
-              <span>Country cluster (wealth)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
-              <span>Asset (real estate)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-blue-400 inline-block"></span>
-              <span>Asset (vessel)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-purple-500 inline-block"></span>
-              <span>Asset (art)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span
-                className="w-2 h-2 rounded-full inline-block"
-                style={{ backgroundColor: "#f97316" }}
-              ></span>
-              <span>Event (earthquake)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span
-                className="w-2 h-2 rounded-full inline-block"
-                style={{ backgroundColor: "#38bdf8" }}
-              ></span>
-              <span>Event (insider sell)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span
-                className="w-2 h-2 rounded-full inline-block"
-                style={{ backgroundColor: "#ef4444" }}
-              ></span>
-              <span>Event (SEC enforcement)</span>
+            {eventTypes.map((t) => (
+              <div key={t} className="flex items-center gap-2">
+                <span
+                  className="w-2 h-2 rounded-full inline-block"
+                  style={{ backgroundColor: eventTypeColor(t) }}
+                />
+                <span>{eventTypeLabel(t)}</span>
+              </div>
+            ))}
+            {eventTypes.length === 0 && (
+              <div className="text-white/30">No mapped events</div>
+            )}
+            <div className="flex items-center gap-2 mt-2">
+              <span className="w-2 h-2 rounded-full inline-block bg-white/60" />
+              <span>Assets coloured by owner</span>
             </div>
             <div className="mt-2 text-white/30 text-xs">
-              Click a country to fly there · Hover for details
+              Click an asset to open its owner · Hover for details
             </div>
           </div>
         </div>
