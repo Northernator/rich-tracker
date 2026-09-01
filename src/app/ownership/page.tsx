@@ -3,6 +3,7 @@ import { assets, ownershipLinks, people, sources } from "@/lib/db/schema";
 import { eq, asc, sql } from "drizzle-orm";
 import Database from "better-sqlite3";
 import { join } from "path";
+import { loadChains, type OwnershipChain } from "@/lib/db/chains";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -79,6 +80,89 @@ function assetTypeIcon(type: string): string {
     other: "•",
   };
   return map[type] ?? "•";
+}
+
+// ---------------------------------------------------------------------------
+// Chunk 10 — ownership chain row
+// ---------------------------------------------------------------------------
+
+function chainConfidenceClass(c: number): string {
+  if (c >= 0.8) return "text-success";
+  if (c >= 0.5) return "text-warning";
+  return "text-fg-muted";
+}
+
+interface ChainRowProps {
+  index: string;
+  label: string;
+  name: string;
+  sub?: string | null;
+  /** Public-record URL this node/link was sourced from. */
+  href: string;
+  confidence: number;
+  /** Roster profile URL, when this terminal node has one here. */
+  personHref?: string | null;
+  /** Draws the connector tail to the next row. */
+  isLast?: boolean;
+}
+
+function ChainRow({
+  index,
+  label,
+  name,
+  sub,
+  href,
+  confidence,
+  personHref,
+  isLast,
+}: ChainRowProps) {
+  const dead = !href || href.startsWith("#");
+  return (
+    <div className="relative flex items-start gap-3">
+      {!isLast && (
+        <span
+          className="absolute left-[11px] top-6 bottom-[-12px] w-px bg-border"
+          aria-hidden
+        />
+      )}
+      <div className="relative z-10 flex-shrink-0 w-6 h-6 rounded-full bg-surface border border-border flex items-center justify-center font-mono text-xs text-fg-muted">
+        {index}
+      </div>
+      <div className="flex-1 min-w-0 pb-1">
+        <div className="flex items-center gap-2">
+          <span className="text-xs uppercase tracking-wide text-fg-faint">
+            {label}
+          </span>
+          <span className={`font-mono text-xs ${chainConfidenceClass(confidence)}`}>
+            {confidence.toFixed(2)}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {dead ? (
+            <span className="font-medium text-fg">{name}</span>
+          ) : (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-fg hover:text-accent transition-colors"
+            >
+              {name}
+            </a>
+          )}
+          {personHref && (
+            <a
+              href={personHref}
+              className="text-xs text-accent hover:text-fg transition-colors"
+            >
+              profile →
+            </a>
+          )}
+        </div>
+        {sub && <p className="text-xs text-fg-faint font-mono mt-0.5">{sub}</p>}
+      </div>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -202,6 +286,11 @@ const lowConfCount = assetList.filter((a) =>
 // ---------------------------------------------------------------------------
 
 export default async function OwnershipPage() {
+  // Chunk 10: multi-hop beneficial-ownership chains. Loaded separately from the
+  // Slice-6 asset graph because each chain carries per-hop confidence and a
+  // clickable citation, which the older single-edge model could not.
+  const chains = await loadChains(50);
+
   return (
     <div className="max-w-5xl mx-auto px-6 py-12">
       <div className="mb-12">
@@ -223,6 +312,103 @@ export default async function OwnershipPage() {
         </p>
       </div>
 
+      {/* Chunk 10 — ownership chains */}
+      {chains.length > 0 && (
+        <section className="mb-12">
+          <h2 className="font-serif text-2xl font-semibold text-fg mb-1 flex items-center gap-3">
+            Ownership chains
+            <span className="font-sans text-sm font-normal text-fg-faint">
+              {chains.length}
+            </span>
+          </h2>
+          <p className="text-sm text-fg-muted leading-relaxed max-w-2xl mb-5">
+            Property → company → person, one hop per row. Each hop keeps its own
+            confidence; the chain confidence is the product, and anything under
+            0.5 renders as a possible link, never as fact. Every label links to
+            the public record it came from.
+          </p>
+
+          <div className="space-y-4">
+            {chains.map((chain, ci) => {
+              const companyUrl = `https://find-and-update.company-information.service.gov.uk/company/${encodeURIComponent(
+                chain.company.entityId.replace(/^ch:/, "")
+              )}`;
+              const isPossible = chain.verdict === "possible-link";
+              return (
+                <div
+                  key={`${chain.property.entityId}-${chain.person.entityId}-${ci}`}
+                  className={`border border-border rounded-md bg-white overflow-hidden ${
+                    isPossible ? "opacity-90" : ""
+                  }`}
+                >
+                  <div className="px-5 py-3 bg-surface border-b border-border flex items-center justify-between flex-wrap gap-3">
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={`inline-block px-2 py-0.5 rounded text-xs font-mono font-medium ${
+                          isPossible
+                            ? "bg-fg-muted/10 text-fg-muted"
+                            : "bg-success/10 text-success"
+                        }`}
+                      >
+                        {isPossible ? "POSSIBLE LINK" : "SOURCED"}
+                      </span>
+                      <span className="font-mono text-sm text-fg">
+                        chain confidence {chain.confidence.toFixed(2)}
+                      </span>
+                    </div>
+                    <span className="text-xs text-fg-faint">
+                      weakest hop: {chain.weakestHop.fromLabel} → {chain.weakestHop.toLabel}{" "}
+                      ({chain.weakestHop.confidence.toFixed(2)})
+                    </span>
+                  </div>
+
+                  <div className="px-5 py-4 space-y-3">
+                    {/* property */}
+                    <ChainRow
+                      index="1"
+                      label="Property"
+                      name={chain.property.label}
+                      sub={chain.asset?.location ?? chain.property.entityId}
+                      href={
+                        chain.asset?.sourceUrl ?? `#${chain.property.entityId}`
+                      }
+                      confidence={chain.hops[0]?.confidence ?? 0}
+                    />
+                    {/* company */}
+                    <ChainRow
+                      index="2"
+                      label="Company"
+                      name={chain.company.label}
+                      sub={chain.company.entityId}
+                      href={companyUrl}
+                      confidence={chain.hops[1]?.confidence ?? 0}
+                    />
+                    {/* person */}
+                    <ChainRow
+                      index="3"
+                      label={chain.person.personSlug ? "Person" : "Beneficial owner"}
+                      name={chain.person.label}
+                      sub={
+                        chain.person.personSlug
+                          ? `/people/${chain.person.personSlug}`
+                          : "register record (no profile here)"
+                      }
+                      href={chain.hops[1]?.sourceUrl ?? "#"}
+                      confidence={chain.hops[1]?.confidence ?? 0}
+                      personHref={
+                        chain.person.personSlug
+                          ? `/people/${chain.person.personSlug}`
+                          : null
+                      }
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* Summary bar */}
       <div className="border border-border rounded-md bg-surface px-6 py-5 mb-8 flex items-center gap-12 flex-wrap">
         <div>
@@ -231,6 +417,14 @@ export default async function OwnershipPage() {
           </p>
           <p className="font-mono text-2xl font-medium text-fg">
             {assetList.length}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs uppercase tracking-widest text-fg-muted mb-1">
+            Sourced chains
+          </p>
+          <p className="font-mono text-2xl font-medium text-fg">
+            {chains.length}
           </p>
         </div>
         <div>
@@ -399,15 +593,18 @@ export default async function OwnershipPage() {
 
       <div className="mt-8 text-xs text-fg-faint leading-relaxed">
         <p>
-          Source: SEC EDGAR filings, FAA registry, USCG vessel database, county
-          assessor records, auction house records, and public disclosures.
-          Confidence levels reflect whether the ownership is directly filed
-          (high), inferred from public records (medium), or estimated (low).
+          Source: SEC EDGAR filings, FAA registry, USCG vessel database,
+          auction house records, and public disclosures. Ownership chains draw
+          on HM Land Registry open data (Price Paid / OCOD, OGL) and Companies
+          House PSC registers (OGL). Confidence levels reflect whether the
+          ownership is directly filed (high), inferred from public records
+          (medium), or estimated (low).
         </p>
         <p className="mt-2">
           Assets with &ldquo;low&rdquo; confidence are flagged but not
           discarded — they signal where the paper trail is thin, which is
-          often where the real wealth hides.
+          often where the real wealth hides. Ownership chains below 0.5 chain
+          confidence are shown as possible links, never as fact.
         </p>
       </div>
     </div>

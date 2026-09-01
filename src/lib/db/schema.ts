@@ -197,6 +197,14 @@ export const assets = sqliteTable("assets", {
   // resolvable citation. The loader already required this — the column was
   // missing, so 36 fabricated rows landed with no provenance at all.
   sourceUrl: text("source_url").notNull(),
+  /**
+   * The registry's own identifier for this asset — HM Land Registry title
+   * number for UK property, FAA N-number for aircraft, IMO for vessels. Added
+   * in migration 0018 so an ownership chain can name a property by the
+   * identifier the Land Register uses, instead of by a display string that
+   * differs between monthly releases.
+   */
+  externalRef: text("external_ref"),
   lat: real("lat"),
   lng: real("lng"),
   createdAt: text("created_at").notNull().default(""),
@@ -220,6 +228,44 @@ export const ownershipLinks = sqliteTable("ownership_links", {
 
 export type Asset = typeof assets.$inferSelect;
 export type OwnershipLink = typeof ownershipLinks.$inferSelect;
+
+/**
+ * Chunk 10 — one hop of an ownership chain, never a whole claim.
+ *
+ *   property (Land Registry title) → company (Companies House) → person (PSC)
+ *
+ * `ownership_links` collapses that into a single asset↔person row with a
+ * three-valued confidence, which cannot express "this hop is solid and that
+ * hop is weak". Here each hop is its own row with its own citation and a
+ * numeric confidence, so confidence multiplies along the path and the weak
+ * hop is identifiable.
+ *
+ * Node ids are the registry's identifiers, not cuids:
+ *   person → people.id · company → "ch:12345678" · property → "title:BLG69408"
+ */
+export const entityEdges = sqliteTable("entity_edges", {
+  id: text("id").primaryKey().$defaultFn(() => createId()),
+  edgeType: text("edge_type").notNull(), // 'company_owns_property' | 'person_controls_company'
+  fromEntityType: text("from_entity_type").notNull(), // 'person' | 'company' | 'property'
+  fromEntityId: text("from_entity_id").notNull(),
+  fromLabel: text("from_label").notNull(),
+  toEntityType: text("to_entity_type").notNull(),
+  toEntityId: text("to_entity_id").notNull(),
+  toLabel: text("to_label").notNull(),
+  /** 0..1. Multiplies along a path; anything under 0.5 renders as "possible link". */
+  confidence: real("confidence").notNull(),
+  sourceId: text("source_id").references(() => sources.id),
+  sourceUrl: text("source_url").notNull(),
+  /** JSON — registry-specific facts (nature of control, tenure, notified date). */
+  detail: text("detail"),
+  asOf: text("as_of"),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export type EntityEdge = typeof entityEdges.$inferSelect;
+
+/** The threshold below which a chain is a possibility, not a finding. */
+export const CHAIN_CONFIDENCE_FLOOR = 0.5;
 
 // Slice 8: Events — real-world events near owned assets
 export const events = sqliteTable("events", {

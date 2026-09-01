@@ -15,6 +15,8 @@
     "verify:pledges": "pnpm exec tsx scripts/verify_pledges.ts",
     "aircraft:faa": "pnpm exec tsx src/lib/db/load_aircraft.ts",
     "verify:aircraft": "pnpm exec tsx scripts/verify_aircraft.ts",
+    "property:uk": "pnpm exec tsx src/lib/db/load_uk_property.ts",
+    "verify:chains": "pnpm exec tsx scripts/verify_chains.ts",
     "snapshot": "pnpm exec tsx src/lib/db/snapshot.ts",
     "cron": "pnpm exec tsx src/lib/cron/worker.ts",
     "fix:data": "node scripts/fix_data.mjs",
