@@ -16,8 +16,18 @@
  * requested (or it fails), the loader that calls this throws — loudly.
  */
 
-import { readFileSync, existsSync, statSync } from "node:fs";
+import {
+  existsSync,
+  statSync,
+  openSync,
+  readSync,
+  closeSync,
+  createWriteStream,
+  mkdirSync,
+} from "node:fs";
 import { join } from "node:path";
+import { Readable } from "node:stream";
+import { politeFetch } from "@/lib/providers/http";
 
 export const ICIJ_SOURCE_ID = "icij-offshore-leaks";
 
@@ -238,23 +248,165 @@ export function discoverCapture(dir = join(process.cwd(), "data", "raw", "icij")
   return capture;
 }
 
-/** Read a capture CSV as a row generator. Throws on missing file. */
-export function readCaptureCsv(path: string): Generator<string[]> {
-  const text = readFileSync(path, "utf8");
-  return parseCsv(text);
+// ---------------------------------------------------------------------------
+// Streaming CSV reader — the load-bearing fix.
+//
+// The old readCaptureCsv did readFileSync(path) of the ENTIRE file and parsed it
+// in memory. A real ICIJ relationships.csv is 1–3 GB; that path OOM-killed the
+// process. The streaming reader reads the file in fixed-size buffers and yields
+// rows as it goes, so peak memory is bounded by one buffer (plus a small carry
+// for a partial UTF-8 sequence) regardless of file size. The Generator<string[]>
+// contract is byte-for-byte compatible with the old readFileSync+parseCsv path,
+// so every caller (loadStaging, matchOfficers, buildEdges, headerOf) is
+// unchanged.
+// ---------------------------------------------------------------------------
+
+/** Read this many bytes at a time. 64 MB keeps a multi-GB file bounded. */
+const CSV_CHUNK_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Count the bytes at the tail of `buf` that form an INCOMPLETE UTF-8 sequence
+ * (a multibyte char split across a read boundary). Those bytes must be carried
+ * to the next chunk and prepended before decoding, or the character is mangled.
+ */
+function trailingIncompleteBytes(buf: Buffer): number {
+  let i = buf.length;
+  let cont = 0; // number of trailing continuation bytes seen so far
+  while (i > 0) {
+    const b = buf[i - 1];
+    if ((b & 0x80) === 0) return 0; // ASCII byte → safe boundary, nothing to carry
+    if ((b & 0xc0) === 0x80) {
+      cont++; // a 0x80–0xBF continuation byte
+      i--;
+      if (cont >= 4) break; // at most 4 bytes in a UTF-8 sequence
+      continue;
+    }
+    // Lead byte at position i-1. Determine how many continuation bytes it needs.
+    let need = 0;
+    if ((b & 0xe0) === 0xc0) need = 1;
+    else if ((b & 0xf0) === 0xe0) need = 2;
+    else if ((b & 0xf8) === 0xf0) need = 3;
+    return cont < need ? cont + 1 : 0; // incomplete → carry lead + seen continuations
+  }
+  return cont; // ran off the front of the buffer; treat all as incomplete
+}
+
+/** Decode `buf` as UTF-8, returning the clean head and any bytes to carry over. */
+function decodeUtf8Safe(buf: Buffer): { text: string; rest: Buffer } {
+  const k = trailingIncompleteBytes(buf);
+  if (k === 0) return { text: buf.toString("utf8"), rest: Buffer.alloc(0) };
+  return {
+    text: buf.subarray(0, buf.length - k).toString("utf8"),
+    rest: buf.subarray(buf.length - k),
+  };
 }
 
 /**
- * Optional download. The operator may point ICIJ_RAW_BASE at the official ODbL
- * CSV location (default: the ICIJ data-packages repo). This is best-effort and
- * fails loudly — it never fabricates. Not run unless --download is passed.
+ * Memory-bounded streaming CSV generator. Read state (in-quotes flag, current
+ * field, current row) is carried across chunk boundaries so a quoted field that
+ * contains a newline — or that straddles a 64 MB read — is handled correctly,
+ * exactly as parseCsv would on the whole string.
+ */
+export function* streamCsv(path: string, chunkSize = CSV_CHUNK_BYTES): Generator<string[]> {
+  const fd = openSync(path, "r");
+  try {
+    let carry: Buffer = Buffer.alloc(0);
+    let inQuotes = false;
+    // A '"' seen inside quotes whose meaning (escaped-quote vs closing-quote)
+    // depends on the FOLLOWING char. We defer the decision into carried state
+    // instead of peeking text[i+1], because a "" pair can straddle a chunk
+    // boundary — a forward peek would mis-read the boundary and close the quote
+    // early, corrupting every field after it. pendingQuote is carried across
+    // chunks along with inQuotes/field/row, so boundaries are handled exactly.
+    let pendingQuote = false;
+    let field = "";
+    let row: string[] = [];
+    const buf = Buffer.alloc(chunkSize);
+    let n: number;
+    while ((n = readSync(fd, buf, 0, chunkSize, null)) > 0) {
+      const { text, rest } = decodeUtf8Safe(Buffer.concat([carry, buf.subarray(0, n)]));
+      carry = rest;
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (inQuotes) {
+          if (c === '"') {
+            if (pendingQuote) {
+              field += '"'; // second '"' of an escaped "" pair
+              pendingQuote = false;
+            } else {
+              pendingQuote = true; // await the next char to decide
+            }
+          } else if (pendingQuote) {
+            // The pending '"' was a closing quote; resume outside quotes.
+            inQuotes = false;
+            pendingQuote = false;
+            if (c === ",") {
+              row.push(field);
+              field = "";
+            } else if (c === "\n") {
+              row.push(field);
+              yield row;
+              row = [];
+              field = "";
+            } else if (c !== "\r") {
+              field += c;
+            }
+          } else {
+            field += c;
+          }
+        } else if (c === '"') {
+          inQuotes = true;
+        } else if (c === ",") {
+          row.push(field);
+          field = "";
+        } else if (c === "\n") {
+          row.push(field);
+          yield row;
+          row = [];
+          field = "";
+        } else if (c !== "\r") {
+          field += c;
+        }
+      }
+    }
+    // Flush any trailing content after EOF (files without a final newline).
+    // A dangling pendingQuote at EOF is just a closing quote; discard it.
+    if (row.length > 0 || field.length > 0) {
+      row.push(field);
+      yield row;
+    }
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Read a capture CSV as a memory-bounded, streaming row generator. Never reads
+ * the whole file into memory, so a multi-GB relationships export cannot OOM.
+ * Throws (via openSync) on a missing file. */
+export function readCaptureCsv(path: string): Generator<string[]> {
+  return streamCsv(path);
+}
+
+/**
+ * Optional download. The operator may point ICIJ_RAW_BASE at a valid ODbL CSV
+ * location. The previously-bundled default
+ * (ICIJ/offshoreleaks-data-packages/main/raw-data) is DEAD — ICIJ no longer
+ * serves the flat nodes-* / relationships.csv files at that path (the repo's
+ * raw-data folder does not exist on main and the data has moved to their
+ * download portal). So --download fails with a 404 unless ICIJ_RAW_BASE is
+ * explicitly set to a current source. Best-effort and fails loudly — it never
+ * fabricates. Not run unless --download is passed.
+ *
+ * Preferred workflow: obtain the official ODbL CSVs (nodes-entities.csv,
+ * nodes-officers.csv, relationships.csv) from ICIJ's current distribution and
+ * place them in data/raw/icij/, then run "npm run offshore:icij" WITHOUT
+ * --download (discoverCapture picks them up).
  */
 export const ICIJ_RAW_BASE =
   process.env.ICIJ_RAW_BASE ??
   "https://raw.githubusercontent.com/ICIJ/offshoreleaks-data-packages/main/raw-data";
 
 export async function downloadIfRequested(dir: string): Promise<IcijCapture> {
-  const { mkdirSync } = await import("node:fs");
   mkdirSync(dir, { recursive: true });
   const files = [
     { name: "nodes-entities.csv", key: "entities" as const },
@@ -262,20 +414,33 @@ export async function downloadIfRequested(dir: string): Promise<IcijCapture> {
     { name: "relationships.csv", key: "relationships" as const },
   ];
   const captured: IcijCapture = { dir };
-  const { writeFile } = await import("node:fs/promises");
   for (const f of files) {
     const url = `${ICIJ_RAW_BASE.replace(/\/$/, "")}/${f.name}`;
     console.log(`  downloading ${url} …`);
-    const res = await fetch(url, { redirect: "follow" });
+    const res = await politeFetch(url, { redirect: "follow" });
     if (!res.ok) {
-      throw new Error(`ICIJ download failed for ${f.name}: HTTP ${res.status}`);
+      throw new Error(
+        `ICIJ download failed for ${f.name}: HTTP ${res.status}. ` +
+          "The bundled ICIJ_RAW_BASE default is dead (ICIJ moved the flat CSVs off " +
+          "that GitHub path). Set ICIJ_RAW_BASE to a current ODbL source, or place the " +
+          "official nodes-entities.csv / nodes-officers.csv / relationships.csv in " +
+          "data/raw/icij/ and run without --download."
+      );
     }
-    // Read the whole body at once (loaders run server-side, not in a request).
-    const buf = new Uint8Array(await res.arrayBuffer());
+    // Stream the body straight to disk — never buffer the whole file. A real
+    // relationships.csv is 1–3 GB; res.arrayBuffer() would OOM the process.
     const out = join(dir, f.name);
-    await writeFile(out, buf);
+    const fileStream = createWriteStream(out);
+    await new Promise<void>((resolve, reject) => {
+      const src = Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]);
+      src.on("error", reject);
+      fileStream.on("error", reject);
+      fileStream.on("finish", resolve);
+      src.pipe(fileStream);
+    });
+    const size = statSync(out).size;
     captured[f.key] = out;
-    console.log(`  saved ${out} (${(buf.length / 1e6).toFixed(1)} MB)`);
+    console.log(`  saved ${out} (${(size / 1e6).toFixed(1)} MB)`);
   }
   return captured;
 }

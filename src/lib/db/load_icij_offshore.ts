@@ -60,6 +60,27 @@ const MAX_SEED_ENTITIES = 5000;
 const MAX_EDGES = 200_000;
 const BATCH = 500;
 
+// Staging safety ceilings. The ICIJ full export is ~700k entities, ~1M officers,
+// ~3.5M relationships — so these defaults sit well above any real release and
+// will NOT trip on honest data. They exist only to stop a malformed, duplicated,
+// or runaway capture from ballooning the SQLite file. Override per-table with
+// ICIJ_STAGE_CAP_ENTITIES / _OFFICERS / _RELATIONSHIPS if a larger capture is
+// genuinely expected. When a cap trips we log loudly and truncate — never
+// silently corrupt the audit trail.
+const STAGE_CAP_ENTITIES = Number(process.env.ICIJ_STAGE_CAP_ENTITIES ?? 2_000_000);
+const STAGE_CAP_OFFICERS = Number(process.env.ICIJ_STAGE_CAP_OFFICERS ?? 2_000_000);
+const STAGE_CAP_RELATIONSHIPS = Number(process.env.ICIJ_STAGE_CAP_RELATIONSHIPS ?? 10_000_000);
+
+function stageCapHit(kind: string, cap: number): void {
+  console.log(
+    `    ⚠ staging cap reached for ${kind} (${cap}) — truncating. ` +
+      "This exceeds any known real ICIJ release; the capture may be malformed/duplicated. " +
+      "Raise ICIJ_STAGE_CAP_" +
+      kind.toUpperCase() +
+      " to ingest a genuinely larger file."
+  );
+}
+
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
@@ -220,6 +241,11 @@ async function loadStaging(capture: IcijCapture): Promise<LoadStagingResult> {
     for (const cells of gen) {
       const r = readEntityRow(h, cells);
       if (!r) continue;
+      if (entityCount >= STAGE_CAP_ENTITIES) {
+        stageCapHit("entities", STAGE_CAP_ENTITIES);
+        gen.return(undefined);
+        break;
+      }
       entityName.set(r.nodeId, r.name ?? r.nodeId);
       rows.push({
         nodeId: r.nodeId,
@@ -255,6 +281,11 @@ async function loadStaging(capture: IcijCapture): Promise<LoadStagingResult> {
     for (const cells of gen) {
       const r = readOfficerRow(h, cells);
       if (!r) continue;
+      if (officerCount >= STAGE_CAP_OFFICERS) {
+        stageCapHit("officers", STAGE_CAP_OFFICERS);
+        gen.return(undefined);
+        break;
+      }
       rows.push({
         nodeId: r.nodeId,
         name: r.name,
@@ -287,6 +318,11 @@ async function loadStaging(capture: IcijCapture): Promise<LoadStagingResult> {
     for (const cells of gen) {
       const r = readRelationshipRow(h, cells);
       if (!r) continue;
+      if (relationshipCount >= STAGE_CAP_RELATIONSHIPS) {
+        stageCapHit("relationships", STAGE_CAP_RELATIONSHIPS);
+        gen.return(undefined);
+        break;
+      }
       rows.push({
         startId: r.startId,
         endId: r.endId,
