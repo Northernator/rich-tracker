@@ -267,7 +267,7 @@ export default function GlobeView({
             ? "#e8c547"
             : c.totalWealthB >= 500
             ? "#4d9de0"
-            : "#666666",
+            : "#93a7cc",
         radius: Math.max(0.5, Math.min(3, 0.4 + (c.count * 0.5 + c.totalWealthB / 1000 * 0.5) * 0.03)),
       };
     })
@@ -425,12 +425,46 @@ export default function GlobeView({
     const globe = new GlobeClass(canvasRef.current, {});
 
     // Local textures only — never a CDN. Keeps the app offline-capable and
-    // free of third-party runtime dependencies.
+    // free of third-party runtime dependencies. Day texture (not night) so
+    // the globe reads as bright blue/green instead of near-black.
     (globe as any)
-      .globeImageUrl("/textures/earth-night.jpg")
+      .globeImageUrl("/textures/earth-day.jpg")
       .bumpImageUrl("/textures/earth-topology.png")
       .showGraticules(true)
+      .showAtmosphere(true)
+      .atmosphereColor("#9ec2ff")
+      .atmosphereAltitude(0.2)
       .backgroundColor("rgba(0,0,0,0)");
+
+    // Bright lighting rig + a small emissive lift so oceans and shadowed
+    // areas stay visible instead of crushing to black. Uses the globe's own
+    // light instances (no direct three import) and scales them up.
+    try {
+      const existing = (globe as any).lights?.() as
+        | Array<{ intensity?: number }>
+        | undefined;
+      if (Array.isArray(existing)) {
+        for (const l of existing) {
+          if (l && typeof l.intensity === "number") l.intensity *= 1.6;
+        }
+        (globe as any).lights(existing);
+      }
+    } catch {
+      // Non-fatal: globe still renders with the brighter day texture.
+    }
+    try {
+      const mat = (globe as any).globeMaterial() as any;
+      if (mat) {
+        if (mat.color?.set) mat.color.set(0xffffff);
+        if (mat.emissive?.set) {
+          mat.emissive.set(0x223349);
+          mat.emissiveIntensity = 0.55;
+        }
+        mat.needsUpdate = true;
+      }
+    } catch {
+      // Non-fatal: globe still renders with the brighter lights + day texture.
+    }
 
     globeRef.current = globe;
     applyLayers(globe);
@@ -472,9 +506,16 @@ export default function GlobeView({
   }, [showArcs, showAssets, showEvents, showPeople, followMoney, timeFilter]);
 
   return (
-    <div className="flex h-[calc(100vh-65px)] bg-[#0a0a0a]">
+    <div className="flex h-[calc(100vh-65px)] bg-[#0f1d33]">
       {/* Globe canvas */}
-      <div ref={canvasRef} className="flex-1 relative" />
+      <div
+        ref={canvasRef}
+        className="flex-1 relative"
+        style={{
+          background:
+            "radial-gradient(ellipse 90% 75% at 50% 42%, #274a7a 0%, #16294d 45%, #0f1d33 100%)",
+        }}
+      />
 
       {/* Sidebar */}
       <div className="w-80 border-l border-white/10 bg-black/40 backdrop-blur-md overflow-y-auto flex-shrink-0">
@@ -703,7 +744,7 @@ export default function GlobeView({
                           ? "#e8c547"
                           : c.totalWealthB >= 500
                           ? "#4d9de0"
-                          : "#666666",
+                          : "#93a7cc",
                     }}
                   >
                     ${c.totalWealthB.toFixed(0)}B

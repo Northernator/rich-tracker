@@ -75,6 +75,40 @@ export const LICENCE_REGISTER: Record<string, LicenceRecord> = {
     // key terms have historically restricted redistribution; the cross-check
     // role below does not depend on displaying their data publicly.
   },
+  postcodes: {
+    provider: "postcodes",
+    licence: "unlicensed",
+    cost: "£0 (no key, fair use)",
+    // UNCONFIRMED. Postcodes.io serves ONS open postcode data, but the reuse
+    // terms have not been read and recorded. Coordinates land in
+    // `postcode_coords` with a per-postcode citation; do not claim
+    // "display-permitted" until `evidence` is filled in.
+  },
+  openfigi: {
+    provider: "openfigi",
+    licence: "unlicensed",
+    cost: "$0 (free key raises throughput)",
+    // UNCONFIRMED. The mapping API is free with published rate limits
+    // (25/min keyless, 25/6s with key), but the display/redistribution terms
+    // have not been read and recorded. FIGI fills are identifier
+    // cross-checks, not displayed prices.
+  },
+  gnews: {
+    provider: "gnews",
+    licence: "unlicensed",
+    cost: "$0 (100 req/day) or paid tiers",
+    // UNCONFIRMED. Article URLs are cited as event sources (the citation is
+    // the publisher's page, not GNews data), but the API terms have not been
+    // read and recorded.
+  },
+  fred: {
+    provider: "fred",
+    licence: "unlicensed",
+    cost: "$0 (free key, 120 req/min published ceiling)",
+    // UNCONFIRMED. FRED is US federal data, but the API terms of use have not
+    // been read and recorded, so macro observations stay "unlicensed" until
+    // `evidence` is filled in.
+  },
 };
 
 /**

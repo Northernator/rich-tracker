@@ -48,6 +48,11 @@ const HARD_CAPS: Record<string, number> = {
   "document-api.company-information.service.gov.uk": 600,
   "data.sec.gov": 10,
   "www.sec.gov": 10,
+  // OpenFIGI with key: 25 per 6s = 250/min published. Without key the
+  // published ceiling is 25/min; the config below under-uses the cap there.
+  "api.openfigi.com": 250,
+  // FRED published ceiling is 120 req/min; we take half for headroom.
+  "api.stlouisfed.org": 120,
 };
 const RTB_CONFIG: HostConfig = { limit: 20, windowMs: 1000 };
 // Finnhub free tier: 60 calls/minute. Stay under it; the shared default of
@@ -57,6 +62,17 @@ const FINNHUB_CONFIG: HostConfig = { limit: 55, windowMs: 60 * 1000 };
 // here; the daily side is a hard budget in prices/alphavantage.ts, because a
 // throttle there must fail loudly instead of reading as "no data".
 const ALPHAVANTAGE_CONFIG: HostConfig = { limit: 5, windowMs: 60 * 1000 };
+// OpenFIGI mapping limits (published, https://www.openfigi.com/api/documentation):
+// without key 25 req/min and ≤5 jobs per request; with free key 25 per 6s
+// and ≤100 jobs per request. The bucket is key-aware; the jobs-per-request
+// side is enforced by the provider module, which sizes its batches.
+function openFigiConfig(): HostConfig {
+  return process.env.OPENFIGI_API_KEY
+    ? { limit: 25, windowMs: 6000 }
+    : { limit: 25, windowMs: 60 * 1000 };
+}
+// FRED published ceiling is 120 req/min; we take half for headroom.
+const FRED_CONFIG: HostConfig = { limit: 60, windowMs: 60 * 1000 };
 const DEFAULT_CONFIG: HostConfig = { limit: 2, windowMs: 1000 };
 
 function getHostConfig(hostname: string): HostConfig {
@@ -73,6 +89,12 @@ function getHostConfig(hostname: string): HostConfig {
   if (h === "www.alphavantage.co" || h === "alphavantage.co") {
     return ALPHAVANTAGE_CONFIG;
   }
+  if (h === "api.openfigi.com") {
+    return openFigiConfig();
+  }
+  if (h === "api.stlouisfed.org") {
+    return FRED_CONFIG;
+  }
   if (
     h === "cdn.statically.io" ||
     h === "cdn.jsdelivr.net" ||
@@ -80,6 +102,10 @@ function getHostConfig(hostname: string): HostConfig {
   ) {
     return RTB_CONFIG;
   }
+  // api.postcodes.io and gnews.io deliberately stay on the 2/sec default:
+  // postcodes.io publishes no numeric ceiling (fair use; we use the bulk
+  // endpoint so a full run costs ~1 request), and GNews's binding limit is
+  // the 100/day budget enforced in providers/news/gnews.ts.
   return DEFAULT_CONFIG;
 }
 

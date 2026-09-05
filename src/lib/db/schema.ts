@@ -155,6 +155,14 @@ export const securities = sqliteTable("securities", {
   name: text("name"),
   currency: text("currency").notNull(), // ISO 4217: USD, EUR, INR, GBP, …
   cik: text("cik"), // SEC EDGAR CIK for US-listed securities
+  /**
+   * OpenFIGI identifier cross-check (Bloomberg Open Symbology). Filled by
+   * `load_figi.ts`, NULL until then. A FIGI is evidence the ticker+exchange
+   * pair names the instrument we think it does — never typed by hand.
+   */
+  figi: text("figi"),
+  shareClassFigi: text("share_class_figi"),
+  figiSourceUrl: text("figi_source_url"),
   sourceUrl: text("source_url").notNull(),
   createdAt: text("created_at").notNull().default(""),
 });
@@ -228,6 +236,42 @@ export const ownershipLinks = sqliteTable("ownership_links", {
 
 export type Asset = typeof assets.$inferSelect;
 export type OwnershipLink = typeof ownershipLinks.$inferSelect;
+
+/**
+ * Postcode coordinate cache (Postcodes.io, ONS open postcode data).
+ *
+ * One row per normalised postcode (no spaces, uppercase). The audit trail for
+ * every lat/lng this project derives from a postcode: `assets` rows filled by
+ * `load_postcode_coords.ts` cite their own per-postcode URL, and this table
+ * holds the same answer so a re-run costs zero requests.
+ */
+export const postcodeCoords = sqliteTable("postcode_coords", {
+  postcode: text("postcode").primaryKey(),
+  lat: real("lat").notNull(),
+  lng: real("lng").notNull(),
+  sourceUrl: text("source_url").notNull(),
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export type PostcodeCoord = typeof postcodeCoords.$inferSelect;
+
+/**
+ * Macro observations (FRED). A handful of benchmark series — CPI, policy
+ * rate, long rate — so impacts and methodology can cite actual values.
+ * Additive on (series_id, as_of); a re-run inserts nothing.
+ */
+export const macroObservations = sqliteTable("macro_observations", {
+  seriesId: text("series_id").notNull(),
+  asOf: text("as_of").notNull(), // YYYY-MM-DD
+  value: real("value").notNull(),
+  unit: text("unit"),
+  sourceUrl: text("source_url").notNull(),
+  createdAt: text("created_at").notNull().default(""),
+}, (t) => ({
+  uxMacroSeriesDate: uniqueIndex("ux_macro_series_date").on(t.seriesId, t.asOf),
+}));
+
+export type MacroObservation = typeof macroObservations.$inferSelect;
 
 /**
  * Chunk 10 — one hop of an ownership chain, never a whole claim.
